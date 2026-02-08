@@ -127,8 +127,11 @@ for (( i=1; i<=MAX_LOOP; i++ )); do
     "$REVIEW_PROMPT" 2>&1 || true
 
   # ── c. Extract JSON from response ────────────────────────────────
-  # Try direct jq parse first
-  if jq empty "$REVIEW_FILE" 2>/dev/null; then
+  REVIEW_JSON=""
+  if [[ ! -f "$REVIEW_FILE" ]]; then
+    echo "Warning: review output file not found ($REVIEW_FILE). Codex may have failed."
+  elif jq empty "$REVIEW_FILE" 2>/dev/null; then
+    # Direct jq parse
     REVIEW_JSON=$(cat "$REVIEW_FILE")
   else
     # Extract JSON from markdown fences or mixed text
@@ -181,6 +184,13 @@ EOF
 
   # Snapshot dirty/untracked files before Claude runs so we only commit its changes
   PRE_FIX_DIRTY=$( { git diff --name-only; git ls-files --others --exclude-standard; } | sort -u )
+  # Save content hashes of pre-dirty files to detect in-place modifications
+  PRE_FIX_HASHES=""
+  if [[ -n "$PRE_FIX_DIRTY" ]]; then
+    PRE_FIX_HASHES=$(echo "$PRE_FIX_DIRTY" | while IFS= read -r f; do
+      [[ -f "$f" ]] && echo "$(git hash-object "$f")  $f" || true
+    done)
+  fi
 
   export REVIEW_JSON
   FIX_PROMPT=$(envsubst < "$TEMPLATES_DIR/claude-fix.prompt.md")
@@ -197,8 +207,18 @@ EOF
     echo "  No file changes after fix — nothing to commit."
   else
     echo "[$(date +%H:%M:%S)] Committing fixes..."
-    # Only stage files changed by Claude (not in the pre-fix dirty set)
-    FIX_FILES=$(comm -13 <(echo "$PRE_FIX_DIRTY") <(echo "$POST_FIX_DIRTY"))
+    # Stage files that are either newly dirty or were dirty but content changed
+    NEW_FILES=$(comm -13 <(echo "$PRE_FIX_DIRTY") <(echo "$POST_FIX_DIRTY"))
+    MODIFIED_FILES=""
+    if [[ -n "$PRE_FIX_DIRTY" ]]; then
+      MODIFIED_FILES=$(echo "$PRE_FIX_DIRTY" | while IFS= read -r f; do
+        [[ -f "$f" ]] || continue
+        OLD_HASH=$(echo "$PRE_FIX_HASHES" | grep "  $f\$" | cut -d' ' -f1)
+        NEW_HASH=$(git hash-object "$f")
+        [[ "$OLD_HASH" != "$NEW_HASH" ]] && echo "$f" || true
+      done)
+    fi
+    FIX_FILES=$( { echo "$NEW_FILES"; echo "$MODIFIED_FILES"; } | sort -u | sed '/^$/d')
     if [[ -z "$FIX_FILES" ]]; then
       echo "  No new changes from Claude fix — skipping commit."
     else
