@@ -7,6 +7,7 @@ Codex(reviewer) and Claude(developer) collaborate to automatically improve code 
 - [codex](https://github.com/openai/codex) — OpenAI Codex CLI
 - [claude](https://github.com/anthropics/claude-code) — Claude Code CLI
 - [jq](https://jqlang.github.io/jq/) — JSON processor
+- [gh](https://cli.github.com/) — GitHub CLI (for PR comments)
 - git
 
 ## Quick Start
@@ -54,11 +55,12 @@ Examples:
    a. Generate diff: git diff $TARGET...$CURRENT
    b. Empty diff → exit
    c. Codex reviews the diff → JSON with findings
-   d. No P0/P1 findings + "patch is correct" → exit
-   e. Claude fixes P0/P1 issues (skips P2/P3)
+   d. No findings + "patch is correct" → exit
+   e. Claude fixes all issues (P0-P3)
    f. Auto-commit fixes to branch
    g. Push to remote (updates PR)
-   h. Next iteration reviews the updated committed state
+   h. Post review findings + fix summary as PR comment
+   i. Next iteration reviews the updated committed state
 4. Write summary to .ai-review-logs/summary.md
 ```
 
@@ -85,15 +87,14 @@ Edit the templates in `templates/`:
 |-------|---------|--------|
 | P0 | Blocking release | Fixed by Claude |
 | P1 | Urgent | Fixed by Claude |
-| P2 | Normal | Skipped (logged) |
-| P3 | Low / nice-to-have | Skipped (logged) |
+| P2 | Normal | Fixed by Claude |
+| P3 | Low / nice-to-have | Fixed by Claude |
 
 ## Exit Conditions
 
 The loop terminates when any of these occur:
 
 - **all_clear** — No findings and overall verdict is "patch is correct"
-- **only_low_priority** — Only P2/P3 findings remain
 - **no_diff** — No changes between branches
 - **dry_run** — Review-only mode
 - **max_iterations_reached** — Hit the `-n` limit

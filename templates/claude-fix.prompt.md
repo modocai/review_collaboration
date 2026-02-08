@@ -7,7 +7,7 @@ You are a developer fixing code issues identified by a code review.
 
 ## Review Findings
 
-The following JSON contains the review findings. Fix **only P0 and P1 issues**. Skip P2 and P3.
+The following JSON contains the review findings. Fix **all issues** regardless of priority (P0 through P3).
 
 ```json
 ${REVIEW_JSON}
@@ -15,7 +15,7 @@ ${REVIEW_JSON}
 
 ## Instructions
 
-For each P0 or P1 finding:
+For each finding:
 
 1. **Read** the file at the location specified in `code_location`.
 2. **Verify** the issue actually exists — if the reviewer was wrong, skip it and note why.
