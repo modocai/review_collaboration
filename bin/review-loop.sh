@@ -16,9 +16,10 @@ AUTO_COMMIT=true
 # Project-level config file can override defaults above.
 # CLI arguments take precedence over .reviewlooprc values.
 REVIEWLOOPRC=".reviewlooprc"
-if [[ -f "$REVIEWLOOPRC" ]]; then
+_GIT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || true)
+if [[ -n "$_GIT_ROOT" && -f "$_GIT_ROOT/$REVIEWLOOPRC" ]]; then
   # shellcheck source=/dev/null
-  source "$REVIEWLOOPRC"
+  source "$_GIT_ROOT/$REVIEWLOOPRC"
 fi
 
 # ── Usage ─────────────────────────────────────────────────────────────
@@ -282,6 +283,14 @@ EOF
   # After Claude, only its changes are in the working tree (stash holds user edits).
   if [[ "$AUTO_COMMIT" != true ]]; then
     echo "  AUTO_COMMIT is disabled — skipping commit and push."
+    # Restore stash before breaking; uncommitted fixes would be stashed away
+    # on the next iteration, causing the loop to re-review the same diff.
+    if [[ "$STASH_CREATED" == true ]]; then
+      trap - EXIT
+      git stash pop --index -q || echo "Warning: stash pop failed; your changes are still in git stash."
+    fi
+    FINAL_STATUS="auto_commit_disabled"
+    break
   else
     # Collect changed/new files as NUL-delimited list for whitespace safety.
     # Use a temp file because Bash strips NUL bytes in command substitution.
