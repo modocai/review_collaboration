@@ -22,6 +22,11 @@ if [[ -n "$_GIT_ROOT" && -f "$_GIT_ROOT/$REVIEWLOOPRC" ]]; then
   source "$_GIT_ROOT/$REVIEWLOOPRC"
 fi
 
+# Resolve relative PROMPTS_DIR against git root so the script works from any cwd
+if [[ -n "$_GIT_ROOT" && "$PROMPTS_DIR" != /* ]]; then
+  PROMPTS_DIR="$_GIT_ROOT/$PROMPTS_DIR"
+fi
+
 # ── Usage ─────────────────────────────────────────────────────────────
 usage() {
   cat <<'EOF'

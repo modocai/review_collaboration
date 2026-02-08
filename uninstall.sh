@@ -16,13 +16,16 @@ if [[ -f "$TARGET_DIR/bin/review-loop.sh" ]]; then
   rmdir "$TARGET_DIR/bin" 2>/dev/null && echo "Removed empty bin/" || true
 fi
 
-# Remove prompts/active/
-if [[ -d "$TARGET_DIR/prompts/active" ]]; then
-  rm -rf "$TARGET_DIR/prompts/active"
-  echo "Removed prompts/active/"
-  # Remove prompts/ if empty
-  rmdir "$TARGET_DIR/prompts" 2>/dev/null && echo "Removed empty prompts/" || true
-fi
+# Remove only prompt files installed by this tool
+for _pfile in codex-review.prompt.md claude-fix.prompt.md; do
+  if [[ -f "$TARGET_DIR/prompts/active/$_pfile" ]]; then
+    rm "$TARGET_DIR/prompts/active/$_pfile"
+    echo "Removed prompts/active/$_pfile"
+  fi
+done
+# Remove directories only if empty
+rmdir "$TARGET_DIR/prompts/active" 2>/dev/null && echo "Removed empty prompts/active/" || true
+rmdir "$TARGET_DIR/prompts" 2>/dev/null && echo "Removed empty prompts/" || true
 
 # Remove .reviewlooprc.example
 if [[ -f "$TARGET_DIR/.reviewlooprc.example" ]]; then
