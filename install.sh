@@ -4,15 +4,25 @@ set -euo pipefail
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 TARGET_DIR="${1:-.}"
 
+# Read version from review-loop.sh
+VERSION=$(grep -m1 '^VERSION=' "$SCRIPT_DIR/bin/review-loop.sh" | cut -d'"' -f2)
+
 # Resolve to absolute path
 TARGET_DIR=$(cd "$TARGET_DIR" && pwd)
 
-echo "Installing review-loop into: $TARGET_DIR"
+echo "Installing review-loop v${VERSION} into: $TARGET_DIR"
 
-# Copy bin/ and templates/
+# Copy bin/ and active prompts
 cp -r "$SCRIPT_DIR/bin" "$TARGET_DIR/"
-cp -r "$SCRIPT_DIR/templates" "$TARGET_DIR/"
+mkdir -p "$TARGET_DIR/prompts/active"
+cp "$SCRIPT_DIR"/prompts/active/* "$TARGET_DIR/prompts/active/"
 chmod +x "$TARGET_DIR/bin/review-loop.sh"
+
+# Copy .reviewlooprc.example
+if [[ -f "$SCRIPT_DIR/.reviewlooprc.example" ]]; then
+  cp "$SCRIPT_DIR/.reviewlooprc.example" "$TARGET_DIR/"
+  echo "Copied .reviewlooprc.example"
+fi
 
 # Add .ai-review-logs/ to .gitignore if not already present
 GITIGNORE="$TARGET_DIR/.gitignore"

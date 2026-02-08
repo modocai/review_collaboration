@@ -1,13 +1,25 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+VERSION="0.1.0"
+
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
-TEMPLATES_DIR="$SCRIPT_DIR/../templates"
+PROMPTS_DIR="$SCRIPT_DIR/../prompts/active"
 
 # ── Defaults ──────────────────────────────────────────────────────────
 TARGET_BRANCH="develop"
 MAX_LOOP=""
 DRY_RUN=false
+AUTO_COMMIT=true
+
+# ── Load .reviewlooprc (if present) ──────────────────────────────────
+# Project-level config file can override defaults above.
+# CLI arguments take precedence over .reviewlooprc values.
+REVIEWLOOPRC=".reviewlooprc"
+if [[ -f "$REVIEWLOOPRC" ]]; then
+  # shellcheck source=/dev/null
+  source "$REVIEWLOOPRC"
+fi
 
 # ── Usage ─────────────────────────────────────────────────────────────
 usage() {
@@ -18,6 +30,7 @@ Options:
   -t, --target <branch>    Target branch to diff against (default: develop)
   -n, --max-loop <N>       Maximum review-fix iterations (required)
   --dry-run                Run review only, do not fix
+  -V, --version            Show version
   -h, --help               Show this help message
 
 Flow:
@@ -45,6 +58,7 @@ while [[ $# -gt 0 ]]; do
       if [[ $# -lt 2 ]]; then echo "Error: '$1' requires an argument."; usage 1; fi
       MAX_LOOP="$2"; shift 2 ;;
     --dry-run)    DRY_RUN=true; shift ;;
+    -V|--version) echo "review-loop v$VERSION"; exit 0 ;;
     -h|--help)    usage ;;
     *)            echo "Error: unknown option '$1'"; usage 1 ;;
   esac
@@ -156,7 +170,7 @@ for (( i=1; i<=MAX_LOOP; i++ )); do
   REVIEW_FILE="$LOG_DIR/review-${i}.json"
   rm -f "$REVIEW_FILE"
 
-  REVIEW_PROMPT=$(envsubst < "$TEMPLATES_DIR/codex-review.prompt.md")
+  REVIEW_PROMPT=$(envsubst < "$PROMPTS_DIR/codex-review.prompt.md")
 
   if ! codex exec \
     --sandbox read-only \
@@ -247,7 +261,7 @@ EOF
   FIX_FILE="$LOG_DIR/fix-${i}.md"
 
   export REVIEW_JSON
-  FIX_PROMPT=$(envsubst < "$TEMPLATES_DIR/claude-fix.prompt.md")
+  FIX_PROMPT=$(envsubst < "$PROMPTS_DIR/claude-fix.prompt.md")
 
   if ! printf '%s' "$FIX_PROMPT" | claude -p - \
     --allowedTools "Edit,Read,Glob,Grep,Bash" \
