@@ -249,7 +249,7 @@ EOF
   export REVIEW_JSON
   FIX_PROMPT=$(envsubst < "$TEMPLATES_DIR/claude-fix.prompt.md")
 
-  if ! claude -p "$FIX_PROMPT" \
+  if ! printf '%s' "$FIX_PROMPT" | claude -p - \
     --allowedTools "Edit,Read,Glob,Grep,Bash" \
     > "$FIX_FILE" 2>&1; then
     echo "  Error: Claude fix failed (iteration $i). See $FIX_FILE for details."
