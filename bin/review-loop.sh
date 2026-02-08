@@ -153,6 +153,11 @@ for (( i=1; i<=MAX_LOOP; i++ )); do
     "$REVIEW_PROMPT" 2>&1; then
     echo "Error: Codex review failed (iteration $i). Skipping this iteration."
     FINAL_STATUS="codex_error"
+    # Restore stash before breaking
+    if [[ "$STASH_CREATED" == true ]]; then
+      trap - EXIT
+      git stash pop -q || echo "Warning: stash pop failed; your changes are still in git stash."
+    fi
     break
   fi
 
@@ -176,6 +181,11 @@ for (( i=1; i<=MAX_LOOP; i++ )); do
     echo "Warning: could not parse review output as JSON. Saving raw output."
     echo "  See $REVIEW_FILE for details."
     FINAL_STATUS="parse_error"
+    # Restore stash before breaking
+    if [[ "$STASH_CREATED" == true ]]; then
+      trap - EXIT
+      git stash pop -q || echo "Warning: stash pop failed; your changes are still in git stash."
+    fi
     break
   fi
 
@@ -198,6 +208,11 @@ EOF
       echo "  PR comment posted."
     fi
     FINAL_STATUS="all_clear"
+    # Restore stash before breaking
+    if [[ "$STASH_CREATED" == true ]]; then
+      trap - EXIT
+      git stash pop -q || echo "Warning: stash pop failed; your changes are still in git stash."
+    fi
     break
   fi
 
@@ -205,6 +220,11 @@ EOF
   if [[ "$DRY_RUN" == true ]]; then
     echo "  Dry-run mode — skipping fixes."
     FINAL_STATUS="dry_run"
+    # Restore stash before breaking
+    if [[ "$STASH_CREATED" == true ]]; then
+      trap - EXIT
+      git stash pop -q || echo "Warning: stash pop failed; your changes are still in git stash."
+    fi
     break
   fi
 
