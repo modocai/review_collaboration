@@ -29,7 +29,6 @@ if [[ -f "$GITIGNORE" ]] && { grep -qxF "$MARKER_NEW" "$GITIGNORE" || grep -qxF 
   awk -v m1="$MARKER_NEW" -v m2="$MARKER_OLD" '
     $0 == m1 || $0 == m2 { skip=1; next }
     skip && /^\.(review-loop\/|ai-review-logs\/|reviewlooprc\.example)$/ { next }
-    skip && /^(bin\/|prompts\/)$/ { next }
     { skip=0; print }
   ' "$GITIGNORE" > "$TMP_GITIGNORE"
   # Remove trailing blank lines

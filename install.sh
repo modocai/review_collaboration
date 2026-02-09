@@ -39,6 +39,10 @@ MARKER="# review-loop (added by installer)"
 if [[ -f "$GITIGNORE" ]] && grep -qxF "$MARKER" "$GITIGNORE"; then
   echo "review-loop entry already in .gitignore"
 else
+  # Ensure file ends with a newline before appending
+  if [[ -f "$GITIGNORE" ]] && [[ -s "$GITIGNORE" ]] && [[ "$(tail -c1 "$GITIGNORE")" != "" ]]; then
+    echo "" >> "$GITIGNORE"
+  fi
   {
     echo "$MARKER"
     echo ".review-loop/"
