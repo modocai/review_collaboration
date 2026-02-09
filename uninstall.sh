@@ -20,34 +20,14 @@ else
   echo "No .review-loop/ directory found."
 fi
 
-# Remove legacy install artifacts (pre-.review-loop/ layout)
-if [[ -f "$TARGET_DIR/bin/review-loop.sh" ]]; then
-  rm "$TARGET_DIR/bin/review-loop.sh"
-  echo "Removed legacy bin/review-loop.sh"
-  rmdir "$TARGET_DIR/bin" 2>/dev/null && echo "Removed empty bin/" || true
-fi
-for _pfile in codex-review.prompt.md claude-fix.prompt.md; do
-  if [[ -f "$TARGET_DIR/prompts/active/$_pfile" ]]; then
-    rm "$TARGET_DIR/prompts/active/$_pfile"
-    echo "Removed legacy prompts/active/$_pfile"
-  fi
-done
-rmdir "$TARGET_DIR/prompts/active" 2>/dev/null && echo "Removed empty prompts/active/" || true
-rmdir "$TARGET_DIR/prompts" 2>/dev/null && echo "Removed empty prompts/" || true
-if [[ -f "$TARGET_DIR/.reviewlooprc.example" ]]; then
-  rm "$TARGET_DIR/.reviewlooprc.example"
-  echo "Removed legacy .reviewlooprc.example"
-fi
-
-# Remove review-loop entries from .gitignore (only installer-owned block)
+# Remove review-loop entry from .gitignore
 GITIGNORE="$TARGET_DIR/.gitignore"
-MARKER_NEW="# review-loop (added by installer)"
-MARKER_OLD="# AI review logs (added by review-loop installer)"
-if [[ -f "$GITIGNORE" ]] && { grep -qxF "$MARKER_NEW" "$GITIGNORE" || grep -qxF "$MARKER_OLD" "$GITIGNORE"; }; then
+MARKER="# review-loop (added by installer)"
+if [[ -f "$GITIGNORE" ]] && grep -qxF "$MARKER" "$GITIGNORE"; then
   TMP_GITIGNORE=$(mktemp)
-  awk -v m1="$MARKER_NEW" -v m2="$MARKER_OLD" '
-    $0 == m1 || $0 == m2 { skip=1; next }
-    skip && /^\.(review-loop\/|ai-review-logs\/)$/ { next }
+  awk -v marker="$MARKER" '
+    $0 == marker { skip=1; next }
+    skip && /^\.review-loop\/$/ { next }
     { skip=0; print }
   ' "$GITIGNORE" > "$TMP_GITIGNORE"
   # Remove trailing blank lines
