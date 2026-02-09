@@ -19,6 +19,10 @@ if [[ -d "$TARGET_DIR/.review-loop" ]]; then
 fi
 
 # Remove legacy install layout (pre-.review-loop/ consolidation)
+_legacy_install=false
+if [[ -f "$TARGET_DIR/bin/review-loop.sh" ]] || [[ -d "$TARGET_DIR/prompts/active" ]]; then
+  _legacy_install=true
+fi
 if [[ -f "$TARGET_DIR/bin/review-loop.sh" ]]; then
   rm "$TARGET_DIR/bin/review-loop.sh"
   echo "Removed bin/review-loop.sh"
@@ -32,9 +36,11 @@ for _pfile in codex-review.prompt.md claude-fix.prompt.md; do
 done
 rmdir "$TARGET_DIR/prompts/active" 2>/dev/null && echo "Removed empty prompts/active/" || true
 rmdir "$TARGET_DIR/prompts" 2>/dev/null && echo "Removed empty prompts/" || true
-if [[ -f "$TARGET_DIR/.reviewlooprc.example" ]]; then
+# Only remove root .reviewlooprc.example for legacy installs — the current
+# installer places it inside .review-loop/ which is already removed above.
+if [[ "$_legacy_install" == true ]] && [[ -f "$TARGET_DIR/.reviewlooprc.example" ]]; then
   rm "$TARGET_DIR/.reviewlooprc.example"
-  echo "Removed .reviewlooprc.example"
+  echo "Removed legacy .reviewlooprc.example"
 fi
 
 # Remove review-loop entry from .gitignore (current marker)
