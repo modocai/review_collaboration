@@ -80,7 +80,7 @@ AUTO_COMMIT=true
 PROMPTS_DIR="./custom-prompts"
 ```
 
-See `.reviewlooprc.example` for all available options.
+See `.review-loop/.reviewlooprc.example` for all available options.
 
 ## How It Works
 
