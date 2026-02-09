@@ -146,7 +146,7 @@ CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 # Allow .gitignore to be dirty — the installer modifies it to add .review-loop/
 _dirty_files=$(git diff --name-only)
 _dirty_non_gitignore=$(echo "$_dirty_files" | grep -v '^\.gitignore$' || true)
-_untracked_non_gitignore=$(git ls-files --others --exclude-standard | grep -v '^\.gitignore$' || true)
+_untracked_non_gitignore=$(git ls-files --others --exclude-standard | grep -v -E '^(\.gitignore|\.reviewlooprc)$' || true)
 _staged_non_gitignore=$(git diff --cached --name-only | grep -v '^\.gitignore$' || true)
 if [[ -n "$_dirty_non_gitignore" ]] || [[ -n "$_staged_non_gitignore" ]] || [[ -n "$_untracked_non_gitignore" ]]; then
   echo "Error: working tree is not clean. Commit or stash your changes before running review-loop."
@@ -297,7 +297,7 @@ EOF
     # Collect changed/new files as NUL-delimited list for whitespace safety.
     # Use a temp file because Bash strips NUL bytes in command substitution.
     FIX_FILES_NUL_FILE=$(mktemp)
-    { git diff --name-only -z; git diff --cached --name-only -z; git ls-files --others --exclude-standard -z; } | tr '\0' '\n' | sort -u | { grep -v -E '^\.review-loop/logs/' || true; } | tr '\n' '\0' > "$FIX_FILES_NUL_FILE"
+    { git diff --name-only -z; git diff --cached --name-only -z; git ls-files --others --exclude-standard -z; } | tr '\0' '\n' | sort -u | { grep -v -E '^(\.review-loop/logs/|\.gitignore)$' || true; } | tr '\n' '\0' > "$FIX_FILES_NUL_FILE"
     if [[ ! -s "$FIX_FILES_NUL_FILE" ]]; then
       echo "  No file changes after fix — nothing to commit."
       rm -f "$FIX_FILES_NUL_FILE"
