@@ -44,8 +44,8 @@ npm install -g @anthropic-ai/claude-code  # Claude Code CLI
 ## Quick Start
 
 ```bash
-# In your project directory:
-./bin/review-loop.sh -n 3
+# In your project directory (after install):
+.review-loop/bin/review-loop.sh -n 3
 ```
 
 ## Usage
@@ -86,7 +86,7 @@ See `.reviewlooprc.example` for all available options.
 
 ```
 1. Check prerequisites (git, codex, claude, jq, envsubst, target branch)
-2. Create .ai-review-logs/ directory
+2. Create .review-loop/logs/ directory
 3. Loop (iteration 1..N):
    a. Generate diff: git diff $TARGET...$CURRENT
    b. Empty diff → exit
@@ -97,12 +97,12 @@ See `.reviewlooprc.example` for all available options.
    g. Push to remote (updates PR)
    h. Post review findings + fix summary as PR comment
    i. Next iteration reviews the updated committed state
-4. Write summary to .ai-review-logs/summary.md
+4. Write summary to .review-loop/logs/summary.md
 ```
 
 ## Output Files
 
-All logs are saved to `.ai-review-logs/` (git-ignored by default):
+All logs are saved to `.review-loop/logs/` (git-ignored by default):
 
 | File | Description |
 |------|-------------|
@@ -112,7 +112,7 @@ All logs are saved to `.ai-review-logs/` (git-ignored by default):
 
 ## Customizing Prompts
 
-Edit the templates in `prompts/active/`:
+Edit the templates in `.review-loop/prompts/active/` (or `prompts/active/` in the source repo):
 
 - **`codex-review.prompt.md`** — Review prompt sent to Codex. Uses `envsubst` variables: `${CURRENT_BRANCH}`, `${TARGET_BRANCH}`, `${ITERATION}`.
 - **`claude-fix.prompt.md`** — Fix prompt sent to Claude. Uses: `${REVIEW_JSON}`, `${CURRENT_BRANCH}`, `${TARGET_BRANCH}`.
@@ -146,7 +146,7 @@ The loop terminates when any of these occur:
 ./uninstall.sh /path/to/your-project
 ```
 
-This removes `bin/review-loop.sh`, `prompts/active/`, `.reviewlooprc.example`, and the `.ai-review-logs/` entry from `.gitignore`.
+This removes the `.review-loop/` directory and its `.gitignore` entry.
 
 ## Contributing
 

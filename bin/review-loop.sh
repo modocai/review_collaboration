@@ -141,7 +141,7 @@ if ! git rev-parse --verify "$TARGET_BRANCH" &>/dev/null; then
 fi
 
 CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
-LOG_DIR=".ai-review-logs"
+LOG_DIR="$SCRIPT_DIR/../logs"
 mkdir -p "$LOG_DIR"
 # Remove stale logs from previous runs so the summary only reflects this execution
 rm -f "$LOG_DIR"/review-*.json "$LOG_DIR"/fix-*.md "$LOG_DIR"/summary.md
@@ -332,7 +332,7 @@ EOF
     # Collect changed/new files as NUL-delimited list for whitespace safety.
     # Use a temp file because Bash strips NUL bytes in command substitution.
     FIX_FILES_NUL_FILE=$(mktemp)
-    { git diff --name-only -z; git diff --cached --name-only -z; git ls-files --others --exclude-standard -z; } | tr '\0' '\n' | sort -u | { grep -v '^\.ai-review-logs/' || true; } | tr '\n' '\0' > "$FIX_FILES_NUL_FILE"
+    { git diff --name-only -z; git diff --cached --name-only -z; git ls-files --others --exclude-standard -z; } | tr '\0' '\n' | sort -u | { grep -v -E '^(\.review-loop/)?logs/' || true; } | tr '\n' '\0' > "$FIX_FILES_NUL_FILE"
     if [[ ! -s "$FIX_FILES_NUL_FILE" ]]; then
       echo "  No file changes after fix — nothing to commit."
       rm -f "$FIX_FILES_NUL_FILE"
