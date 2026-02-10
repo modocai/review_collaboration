@@ -198,6 +198,12 @@ echo " Max iterations: $MAX_LOOP | Sub-loops: $MAX_SUBLOOP | Dry-run: $DRY_RUN"
 echo "═══════════════════════════════════════════════════════"
 echo ""
 
+# ── Pre-loop validation ───────────────────────────────────────────────
+if [[ "$MAX_SUBLOOP" -gt 0 ]] && [[ ! -f "$PROMPTS_DIR/claude-self-review.prompt.md" ]]; then
+  echo "Warning: self-review prompt not found at $PROMPTS_DIR/claude-self-review.prompt.md — disabling self-review."
+  MAX_SUBLOOP=0
+fi
+
 # ── Loop ──────────────────────────────────────────────────────────────
 FINAL_STATUS="max_iterations_reached"
 
@@ -298,7 +304,7 @@ EOF
   } | sort -u | while IFS= read -r _f; do
     [[ -n "$_f" ]] || continue
     if [[ -f "$_f" ]]; then
-      printf '%s\t%s\n' "$(git hash-object "$_f")" "$_f"
+      printf '%s\t%s\n' "$(git hash-object "$_f" 2>/dev/null || echo UNHASHABLE)" "$_f"
     else
       printf 'DELETED\t%s\n' "$_f"
     fi
@@ -324,10 +330,6 @@ EOF
   # ── g2. Claude self-review sub-loop ─────────────────────────────
   SELF_REVIEW_SUMMARY=""
   ORIGINAL_REVIEW_JSON="$REVIEW_JSON"
-  if [[ "$MAX_SUBLOOP" -gt 0 ]] && [[ ! -f "$PROMPTS_DIR/claude-self-review.prompt.md" ]]; then
-    echo "  Warning: self-review prompt not found at $PROMPTS_DIR/claude-self-review.prompt.md — disabling self-review."
-    MAX_SUBLOOP=0
-  fi
   if [[ "$MAX_SUBLOOP" -gt 0 ]]; then
     for (( j=1; j<=MAX_SUBLOOP; j++ )); do
       # Check if Claude's fix produced any changes vs pre-fix snapshot
@@ -338,7 +340,7 @@ EOF
         [[ -n "$_f" ]] || continue
         [[ "$_f" == .review-loop/logs/* ]] && continue
         if [[ -f "$_f" ]]; then
-          _cur_hash=$(git hash-object "$_f")
+          _cur_hash=$(git hash-object "$_f" 2>/dev/null || echo UNHASHABLE)
         else
           _cur_hash="DELETED"
         fi
@@ -434,7 +436,7 @@ EOF
       [[ -n "$_f" ]] || continue
       [[ "$_f" == .review-loop/logs/* ]] && continue
       if [[ -f "$_f" ]]; then
-        _cur_hash=$(git hash-object "$_f")
+        _cur_hash=$(git hash-object "$_f" 2>/dev/null || echo UNHASHABLE)
       else
         _cur_hash="DELETED"
       fi
