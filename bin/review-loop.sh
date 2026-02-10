@@ -214,6 +214,10 @@ echo "════════════════════════�
 echo ""
 
 # ── Pre-loop validation ───────────────────────────────────────────────
+if [[ ! -f "$PROMPTS_DIR/claude-fix-execute.prompt.md" ]]; then
+  echo "Error: required prompt not found: $PROMPTS_DIR/claude-fix-execute.prompt.md" >&2
+  exit 1
+fi
 if [[ "$MAX_SUBLOOP" -gt 0 ]] && [[ ! -f "$PROMPTS_DIR/claude-self-review.prompt.md" ]]; then
   echo "Warning: self-review prompt not found at $PROMPTS_DIR/claude-self-review.prompt.md — disabling self-review."
   MAX_SUBLOOP=0
