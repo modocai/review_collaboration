@@ -301,12 +301,14 @@ EOF
     git diff -z --name-only
     git diff -z --cached --name-only
     git ls-files -z --others --exclude-standard
-  } | sort -uz | while IFS= read -r -d '' _f; do
+  } | perl -0 -e 'my %seen; while (defined(my $l = <>)) { chomp $l; print "$l\0" unless $seen{$l}++ }' | while IFS= read -r -d '' _f; do
     [[ -n "$_f" ]] || continue
     if [[ -f "$_f" ]]; then
-      printf '%s\t%s\n' "$(git hash-object -w "$_f" 2>/dev/null || echo UNHASHABLE)" "$_f"
+      _hash=$(git hash-object -w "$_f" 2>/dev/null || echo UNHASHABLE)
+      if [[ -x "$_f" ]]; then _fmode="100755"; else _fmode="100644"; fi
+      printf '%s\t%s\t%s\n' "$_hash" "$_fmode" "$_f"
     else
-      printf 'DELETED\t%s\n' "$_f"
+      printf 'DELETED\t000000\t%s\n' "$_f"
     fi
   done > "$PRE_FIX_STATE"
 
@@ -334,18 +336,21 @@ EOF
     for (( j=1; j<=MAX_SUBLOOP; j++ )); do
       # Check if Claude's fix produced any changes vs pre-fix snapshot
       _fix_dirty=$(mktemp)
-      { git diff -z --name-only; git diff -z --cached --name-only; git ls-files -z --others --exclude-standard; } | sort -uz > "$_fix_dirty"
+      { git diff -z --name-only; git diff -z --cached --name-only; git ls-files -z --others --exclude-standard; } | perl -0 -e 'my %seen; while (defined(my $l = <>)) { chomp $l; print "$l\0" unless $seen{$l}++ }' > "$_fix_dirty"
       _has_fix_changes=false
       while IFS= read -r -d '' _f; do
         [[ -n "$_f" ]] || continue
         [[ "$_f" == .review-loop/logs/* ]] && continue
         if [[ -f "$_f" ]]; then
           _cur_hash=$(git hash-object "$_f" 2>/dev/null || echo UNHASHABLE)
+          if [[ -x "$_f" ]]; then _cur_mode="100755"; else _cur_mode="100644"; fi
         else
           _cur_hash="DELETED"
+          _cur_mode="000000"
         fi
-        _pre_hash=$(awk -F'\t' -v f="$_f" '$2 == f { print $1; exit }' "$PRE_FIX_STATE")
-        if [[ -z "$_pre_hash" ]] || [[ "$_cur_hash" != "$_pre_hash" ]]; then
+        _pre_hash=$(awk -F'\t' -v f="$_f" '$3 == f { print $1; exit }' "$PRE_FIX_STATE")
+        _pre_mode=$(awk -F'\t' -v f="$_f" '$3 == f { print $2; exit }' "$PRE_FIX_STATE")
+        if [[ -z "$_pre_hash" ]] || [[ "$_cur_hash" != "$_pre_hash" ]] || [[ "$_cur_mode" != "$_pre_mode" ]]; then
           _has_fix_changes=true
           break
         fi
@@ -432,17 +437,20 @@ EOF
     FIX_FILES_NUL_FILE=$(mktemp)
     _pre_dirty_fix_file=$(mktemp)
     _post_dirty=$(mktemp)
-    { git diff -z --name-only; git diff -z --cached --name-only; git ls-files -z --others --exclude-standard; } | sort -uz > "$_post_dirty"
+    { git diff -z --name-only; git diff -z --cached --name-only; git ls-files -z --others --exclude-standard; } | perl -0 -e 'my %seen; while (defined(my $l = <>)) { chomp $l; print "$l\0" unless $seen{$l}++ }' > "$_post_dirty"
     while IFS= read -r -d '' _f; do
       [[ -n "$_f" ]] || continue
       [[ "$_f" == .review-loop/logs/* ]] && continue
       if [[ -f "$_f" ]]; then
         _cur_hash=$(git hash-object "$_f" 2>/dev/null || echo UNHASHABLE)
+        if [[ -x "$_f" ]]; then _cur_mode="100755"; else _cur_mode="100644"; fi
       else
         _cur_hash="DELETED"
+        _cur_mode="000000"
       fi
-      _pre_hash=$(awk -F'\t' -v f="$_f" '$2 == f { print $1; exit }' "$PRE_FIX_STATE")
-      if [[ -z "$_pre_hash" ]] || [[ "$_cur_hash" != "$_pre_hash" ]]; then
+      _pre_hash=$(awk -F'\t' -v f="$_f" '$3 == f { print $1; exit }' "$PRE_FIX_STATE")
+      _pre_mode=$(awk -F'\t' -v f="$_f" '$3 == f { print $2; exit }' "$PRE_FIX_STATE")
+      if [[ -z "$_pre_hash" ]] || [[ "$_cur_hash" != "$_pre_hash" ]] || [[ "$_cur_mode" != "$_pre_mode" ]]; then
         printf '%s\0' "$_f"
         # Track files that were already dirty before Claude — their pre-fix
         # blob must be loaded into the index first so that git-add only stages
@@ -458,18 +466,51 @@ EOF
       rm -f "$FIX_FILES_NUL_FILE" "$_pre_dirty_fix_file"
     else
       echo "[$(date +%H:%M:%S)] Committing fixes..."
-      # For files that were already dirty before Claude, seed the index with
-      # their pre-fix blob so git-add only stages Claude's changes.
+      # For files that were already dirty before Claude, apply only Claude's
+      # delta on top of the HEAD version so pre-existing hunks are excluded.
+      # Collect pre-dirty paths into an associative array for lookup.
+      declare -A _pre_dirty_paths=()
       if [[ -s "$_pre_dirty_fix_file" ]]; then
         while IFS=$'\t' read -r -d '' _blob _path; do
           [[ -n "$_blob" ]] || continue
+          _pre_dirty_paths["$_path"]="$_blob"
+        done < "$_pre_dirty_fix_file"
+
+        for _path in "${!_pre_dirty_paths[@]}"; do
+          _pre_blob="${_pre_dirty_paths[$_path]}"
+          _head_blob=$(git rev-parse "HEAD:$_path" 2>/dev/null || true)
           _mode=$(git ls-files --stage -- "$_path" 2>/dev/null | awk '{print $1; exit}')
           : "${_mode:=100644}"
-          git update-index --cacheinfo "$_mode,$_blob,$_path" 2>/dev/null || true
-        done < "$_pre_dirty_fix_file"
+          if [[ -n "$_head_blob" ]]; then
+            # Three-way merge: base=pre-fix, ours=HEAD, theirs=current working tree
+            _tmp_base=$(mktemp)
+            _tmp_ours=$(mktemp)
+            _tmp_theirs=$(mktemp)
+            git cat-file blob "$_pre_blob" > "$_tmp_base"
+            git cat-file blob "$_head_blob" > "$_tmp_ours"
+            cp -- "$_path" "$_tmp_theirs"
+            if git merge-file -q "$_tmp_ours" "$_tmp_base" "$_tmp_theirs" 2>/dev/null; then
+              :  # clean merge
+            fi
+            # Stage the merged result (even with conflicts, best effort)
+            _merged_blob=$(git hash-object -w "$_tmp_ours")
+            git update-index --cacheinfo "$_mode,$_merged_blob,$_path" 2>/dev/null || true
+            rm -f "$_tmp_base" "$_tmp_ours" "$_tmp_theirs"
+          else
+            # File didn't exist in HEAD — stage the working tree version directly
+            git add -- "$_path"
+          fi
+        done
       fi
       rm -f "$_pre_dirty_fix_file"
-      xargs -0 git add -- < "$FIX_FILES_NUL_FILE"
+      # Stage remaining (non-pre-dirty) files normally
+      while IFS= read -r -d '' _f; do
+        [[ -n "$_f" ]] || continue
+        if [[ -z "${_pre_dirty_paths[$_f]+x}" ]]; then
+          git add -- "$_f"
+        fi
+      done < "$FIX_FILES_NUL_FILE"
+      unset _pre_dirty_paths
       COMMIT_MSG="fix(ai-review): apply iteration $i fixes
 
 Auto-generated by review-loop.sh (iteration $i/$MAX_LOOP)"
