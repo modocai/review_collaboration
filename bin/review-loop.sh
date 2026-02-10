@@ -176,9 +176,9 @@ CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 # Allow .gitignore/.reviewlooprc to be dirty — the installer modifies .gitignore
 # and the user may have an untracked .reviewlooprc.  Pre-existing dirty files
 # are snapshot-ed before each fix and excluded from commits (see step h).
-_dirty_non_gitignore=$(git diff --name-only | grep -v '^\.gitignore$' || true)
+_dirty_non_gitignore=$(git diff --name-only | grep -v -E '^(\.gitignore|\.reviewlooprc)$' || true)
 _untracked_non_gitignore=$(git ls-files --others --exclude-standard | grep -v -E '^(\.gitignore|\.reviewlooprc)$' || true)
-_staged_non_gitignore=$(git diff --cached --name-only | grep -v '^\.gitignore$' || true)
+_staged_non_gitignore=$(git diff --cached --name-only | grep -v -E '^(\.gitignore|\.reviewlooprc)$' || true)
 if [[ -n "$_dirty_non_gitignore" ]] || [[ -n "$_staged_non_gitignore" ]] || [[ -n "$_untracked_non_gitignore" ]]; then
   echo "Error: working tree is not clean. Commit or stash your changes before running review-loop."
   echo ""
@@ -510,6 +510,7 @@ EOF
       rm -f "$FIX_FILES_NUL_FILE"
     else
       echo "[$(date +%H:%M:%S)] Committing fixes..."
+      git reset --quiet HEAD 2>/dev/null || true
       xargs -0 git add -- < "$FIX_FILES_NUL_FILE"
       COMMIT_MSG="fix(ai-review): apply iteration $i fixes
 
