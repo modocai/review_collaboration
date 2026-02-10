@@ -138,6 +138,21 @@ if [[ "$DRY_RUN" == false ]]; then
 fi
 check_cmd jq
 check_cmd envsubst
+check_cmd perl
+
+# UUID generator with fallback chain: uuidgen → /proc → python3
+_gen_uuid() {
+  if command -v uuidgen &>/dev/null; then
+    uuidgen | tr '[:upper:]' '[:lower:]'
+  elif [[ -f /proc/sys/kernel/random/uuid ]]; then
+    cat /proc/sys/kernel/random/uuid
+  elif command -v python3 &>/dev/null; then
+    python3 -c 'import uuid; print(uuid.uuid4())'
+  else
+    # Last resort: timestamp + random
+    printf '%s-%04x' "$(date +%s)" $RANDOM
+  fi
+}
 HAS_GH=true
 if ! command -v gh &>/dev/null; then
   HAS_GH=false
@@ -246,7 +261,7 @@ for (( i=1; i<=MAX_LOOP; i++ )); do
     REVIEW_JSON=$(cat "$REVIEW_FILE")
   else
     # Extract JSON from markdown fences or mixed text
-    REVIEW_JSON=$(sed -n '/^```\(json\)\{0,1\}$/,/^```$/{ /^```/d; p; }' "$REVIEW_FILE")
+    REVIEW_JSON=$(sed -n '/^```[a-zA-Z]*$/,/^```$/{ /^```/d; p; }' "$REVIEW_FILE")
     # Fallback: find first { ... } block
     if ! echo "$REVIEW_JSON" | jq empty 2>/dev/null; then
       REVIEW_JSON=$(perl -0777 -ne 'print $1 if /(\{.*\})/s' "$REVIEW_FILE" 2>/dev/null || true)
@@ -315,7 +330,7 @@ EOF
   echo "[$(date +%H:%M:%S)] Running Claude fix (step 1: opinion)..."
   FIX_FILE="$LOG_DIR/fix-${i}.md"
   OPINION_FILE="$LOG_DIR/opinion-${i}.md"
-  FIX_SESSION_ID=$(uuidgen | tr '[:upper:]' '[:lower:]')
+  FIX_SESSION_ID=$(_gen_uuid)
 
   export REVIEW_JSON
   FIX_PROMPT=$(envsubst < "$PROMPTS_DIR/claude-fix.prompt.md")
@@ -406,7 +421,7 @@ EOF
       if jq empty "$SELF_REVIEW_FILE" 2>/dev/null; then
         SELF_REVIEW_JSON=$(cat "$SELF_REVIEW_FILE")
       else
-        SELF_REVIEW_JSON=$(sed -n '/^```\(json\)\{0,1\}$/,/^```$/{ /^```/d; p; }' "$SELF_REVIEW_FILE")
+        SELF_REVIEW_JSON=$(sed -n '/^```[a-zA-Z]*$/,/^```$/{ /^```/d; p; }' "$SELF_REVIEW_FILE")
         if ! echo "$SELF_REVIEW_JSON" | jq empty 2>/dev/null; then
           SELF_REVIEW_JSON=$(perl -0777 -ne 'print $1 if /(\{.*\})/s' "$SELF_REVIEW_FILE" 2>/dev/null || true)
         fi
@@ -432,7 +447,7 @@ EOF
       echo "[$(date +%H:%M:%S)] Running Claude re-fix (sub-iteration $j/$MAX_SUBLOOP, step 1: opinion)..."
       REFIX_FILE="$LOG_DIR/refix-${i}-${j}.md"
       REFIX_OPINION_FILE="$LOG_DIR/refix-opinion-${i}-${j}.md"
-      REFIX_SESSION_ID=$(uuidgen | tr '[:upper:]' '[:lower:]')
+      REFIX_SESSION_ID=$(_gen_uuid)
 
       export REVIEW_JSON="$SELF_REVIEW_JSON"
       REFIX_PROMPT=$(envsubst < "$PROMPTS_DIR/claude-fix.prompt.md")
