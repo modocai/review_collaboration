@@ -149,10 +149,11 @@ _gen_uuid() {
   elif command -v python3 &>/dev/null; then
     python3 -c 'import uuid; print(uuid.uuid4())'
   else
-    # Last resort: timestamp + random
-    printf '%s-%04x' "$(date +%s)" $RANDOM
+    # Last resort: timestamp + two independent $RANDOM calls (30-bit entropy)
+    printf '%s-%04x%04x' "$(date +%s)" $RANDOM $RANDOM
   fi
 }
+
 HAS_GH=true
 if ! command -v gh &>/dev/null; then
   HAS_GH=false
@@ -229,8 +230,7 @@ for (( i=1; i<=MAX_LOOP; i++ )); do
   export ITERATION="$i"
 
   # ── a. Check diff ───────────────────────────────────────────────
-  DIFF=$(git diff "$TARGET_BRANCH...$CURRENT_BRANCH")
-  if [[ -z "$DIFF" ]]; then
+  if git diff --quiet "$TARGET_BRANCH...$CURRENT_BRANCH"; then
     echo "No diff between $TARGET_BRANCH and $CURRENT_BRANCH. Nothing to review."
     FINAL_STATUS="no_diff"
     break
