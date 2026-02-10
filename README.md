@@ -115,8 +115,10 @@ All logs are saved to `.review-loop/logs/` (git-ignored by default):
 | File | Description |
 |------|-------------|
 | `review-N.json` | Codex review output for iteration N |
+| `opinion-N.md` | Claude's opinion on review findings (iteration N) |
 | `fix-N.md` | Claude fix log for iteration N |
 | `self-review-N-M.json` | Claude self-review output (iteration N, sub-iteration M) |
+| `refix-opinion-N-M.md` | Claude's opinion on self-review findings (iteration N, sub M) |
 | `refix-N-M.md` | Claude re-fix log (iteration N, sub-iteration M) |
 | `summary.md` | Final summary with status and per-iteration results |
 
@@ -125,7 +127,8 @@ All logs are saved to `.review-loop/logs/` (git-ignored by default):
 Edit the templates in `.review-loop/prompts/active/` (or `prompts/active/` in the source repo):
 
 - **`codex-review.prompt.md`** — Review prompt sent to Codex. Uses `envsubst` variables: `${CURRENT_BRANCH}`, `${TARGET_BRANCH}`, `${ITERATION}`.
-- **`claude-fix.prompt.md`** — Fix prompt sent to Claude. Uses: `${REVIEW_JSON}`, `${CURRENT_BRANCH}`, `${TARGET_BRANCH}`.
+- **`claude-fix.prompt.md`** — Opinion prompt: Claude evaluates review findings. Uses: `${REVIEW_JSON}`, `${CURRENT_BRANCH}`, `${TARGET_BRANCH}`.
+- **`claude-fix-execute.prompt.md`** — Execute prompt: tells Claude to fix based on its opinion.
 - **`claude-self-review.prompt.md`** — Self-review prompt for Claude to check its own fixes. Uses: `${REVIEW_JSON}`, `${CURRENT_BRANCH}`, `${TARGET_BRANCH}`, `${ITERATION}`.
 
 Reference prompts (read-only originals) are in `prompts/reference/`.

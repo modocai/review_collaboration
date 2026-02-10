@@ -177,7 +177,7 @@ unset _dirty_files _dirty_non_gitignore _staged_non_gitignore _untracked_non_git
 LOG_DIR="$SCRIPT_DIR/../logs"
 mkdir -p "$LOG_DIR"
 # Remove stale logs from previous runs so the summary only reflects this execution
-rm -f "$LOG_DIR"/review-*.json "$LOG_DIR"/fix-*.md "$LOG_DIR"/self-review-*.json "$LOG_DIR"/refix-*.md "$LOG_DIR"/summary.md
+rm -f "$LOG_DIR"/review-*.json "$LOG_DIR"/fix-*.md "$LOG_DIR"/opinion-*.md "$LOG_DIR"/self-review-*.json "$LOG_DIR"/refix-*.md "$LOG_DIR"/refix-opinion-*.md "$LOG_DIR"/summary.md
 
 export CURRENT_BRANCH TARGET_BRANCH
 
@@ -316,7 +316,7 @@ EOF
   echo "[$(date +%H:%M:%S)] Running Claude fix (step 1: opinion)..."
   FIX_FILE="$LOG_DIR/fix-${i}.md"
   OPINION_FILE="$LOG_DIR/opinion-${i}.md"
-  FIX_SESSION_ID=$(python3 -c "import uuid; print(uuid.uuid4())")
+  FIX_SESSION_ID=$(uuidgen | tr '[:upper:]' '[:lower:]')
 
   export REVIEW_JSON
   FIX_PROMPT=$(envsubst < "$PROMPTS_DIR/claude-fix.prompt.md")
@@ -431,7 +431,7 @@ EOF
       echo "[$(date +%H:%M:%S)] Running Claude re-fix (sub-iteration $j/$MAX_SUBLOOP, step 1: opinion)..."
       REFIX_FILE="$LOG_DIR/refix-${i}-${j}.md"
       REFIX_OPINION_FILE="$LOG_DIR/refix-opinion-${i}-${j}.md"
-      REFIX_SESSION_ID=$(python3 -c "import uuid; print(uuid.uuid4())")
+      REFIX_SESSION_ID=$(uuidgen | tr '[:upper:]' '[:lower:]')
 
       export REVIEW_JSON="$SELF_REVIEW_JSON"
       REFIX_PROMPT=$(envsubst < "$PROMPTS_DIR/claude-fix.prompt.md")
@@ -546,6 +546,23 @@ Self-review: $(printf '%b' "$SELF_REVIEW_SUMMARY" | tr '\n' '; ' | sed 's/; $//'
       fi
     fi
 
+    # Build opinion section (Claude's assessment of review findings)
+    OPINION_SECTION=""
+    if [[ -f "$OPINION_FILE" ]] && [[ -s "$OPINION_FILE" ]]; then
+      # Truncate to first 2000 chars to keep PR comment reasonable
+      OPINION_EXCERPT=$(head -c 2000 "$OPINION_FILE")
+      OPINION_SECTION=$(cat <<OPEOF
+
+<details>
+<summary>Claude Opinion</summary>
+
+$OPINION_EXCERPT
+
+</details>
+OPEOF
+)
+    fi
+
     # Build self-review section
     SELF_REVIEW_SECTION=""
     if [[ -n "$SELF_REVIEW_SUMMARY" ]]; then
@@ -580,7 +597,7 @@ $FINDINGS_TABLE
 $FIX_SUMMARY
 
 </details>
-${SELF_REVIEW_SECTION}
+${OPINION_SECTION}${SELF_REVIEW_SECTION}
 EOF
 )
     if gh pr comment "$PR_NUMBER" --body "$COMMENT_BODY"; then
