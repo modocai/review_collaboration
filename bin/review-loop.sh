@@ -245,7 +245,7 @@ for (( i=1; i<=MAX_LOOP; i++ )); do
   REVIEW_FILE="$LOG_DIR/review-${i}.json"
   rm -f "$REVIEW_FILE"
 
-  REVIEW_PROMPT=$(envsubst < "$PROMPTS_DIR/codex-review.prompt.md")
+  REVIEW_PROMPT=$(envsubst '$CURRENT_BRANCH $TARGET_BRANCH $ITERATION' < "$PROMPTS_DIR/codex-review.prompt.md")
 
   if ! codex exec \
     --sandbox read-only \
@@ -337,7 +337,7 @@ EOF
   FIX_SESSION_ID=$(_gen_uuid)
 
   export REVIEW_JSON
-  FIX_PROMPT=$(envsubst < "$PROMPTS_DIR/claude-fix.prompt.md")
+  FIX_PROMPT=$(envsubst '$CURRENT_BRANCH $TARGET_BRANCH $REVIEW_JSON' < "$PROMPTS_DIR/claude-fix.prompt.md")
 
   # Step 1: Ask Claude's opinion (read-only, no edit tools)
   if ! printf '%s' "$FIX_PROMPT" | claude -p - \
@@ -404,7 +404,7 @@ EOF
 
       # Ensure self-review prompt always references the original Codex findings
       export REVIEW_JSON="$ORIGINAL_REVIEW_JSON"
-      SELF_REVIEW_PROMPT=$(envsubst < "$PROMPTS_DIR/claude-self-review.prompt.md")
+      SELF_REVIEW_PROMPT=$(envsubst '$CURRENT_BRANCH $TARGET_BRANCH $ITERATION $REVIEW_JSON' < "$PROMPTS_DIR/claude-self-review.prompt.md")
 
       # Claude self-review — tool access for git diff, file reading, etc.
       if ! printf '%s' "$SELF_REVIEW_PROMPT" | claude -p - \
@@ -454,7 +454,7 @@ EOF
       REFIX_SESSION_ID=$(_gen_uuid)
 
       export REVIEW_JSON="$SELF_REVIEW_JSON"
-      REFIX_PROMPT=$(envsubst < "$PROMPTS_DIR/claude-fix.prompt.md")
+      REFIX_PROMPT=$(envsubst '$CURRENT_BRANCH $TARGET_BRANCH $REVIEW_JSON' < "$PROMPTS_DIR/claude-fix.prompt.md")
 
       # Step 1: opinion
       if ! printf '%s' "$REFIX_PROMPT" | claude -p - \
