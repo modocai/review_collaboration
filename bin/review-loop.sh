@@ -312,17 +312,35 @@ EOF
     fi
   done > "$PRE_FIX_STATE"
 
-  # ── g. Claude fix ────────────────────────────────────────────────
-  echo "[$(date +%H:%M:%S)] Running Claude fix..."
+  # ── g. Claude fix (two-step: opinion → execute) ─────────────────
+  echo "[$(date +%H:%M:%S)] Running Claude fix (step 1: opinion)..."
   FIX_FILE="$LOG_DIR/fix-${i}.md"
+  OPINION_FILE="$LOG_DIR/opinion-${i}.md"
+  FIX_SESSION_ID=$(python3 -c "import uuid; print(uuid.uuid4())")
 
   export REVIEW_JSON
   FIX_PROMPT=$(envsubst < "$PROMPTS_DIR/claude-fix.prompt.md")
 
+  # Step 1: Ask Claude's opinion (read-only, no edit tools)
   if ! printf '%s' "$FIX_PROMPT" | claude -p - \
+    --session-id "$FIX_SESSION_ID" \
+    --allowedTools "Read,Glob,Grep,Bash" \
+    > "$OPINION_FILE" 2>&1; then
+    echo "  Error: Claude opinion failed (iteration $i). See $OPINION_FILE for details."
+    FINAL_STATUS="claude_error"
+    break
+  fi
+  echo "  Opinion saved to $OPINION_FILE"
+
+  # Step 2: Tell Claude to fix based on its own analysis
+  echo "[$(date +%H:%M:%S)] Running Claude fix (step 2: execute)..."
+  FIX_EXEC_PROMPT=$(cat "$PROMPTS_DIR/claude-fix-execute.prompt.md")
+
+  if ! printf '%s' "$FIX_EXEC_PROMPT" | claude -p - \
+    --resume "$FIX_SESSION_ID" \
     --allowedTools "Edit,Read,Glob,Grep,Bash" \
     > "$FIX_FILE" 2>&1; then
-    echo "  Error: Claude fix failed (iteration $i). See $FIX_FILE for details."
+    echo "  Error: Claude fix-execute failed (iteration $i). See $FIX_FILE for details."
     FINAL_STATUS="claude_error"
     break
   fi
@@ -409,17 +427,34 @@ EOF
         break
       fi
 
-      # Claude re-fix
-      echo "[$(date +%H:%M:%S)] Running Claude re-fix (sub-iteration $j/$MAX_SUBLOOP)..."
+      # Claude re-fix (two-step: opinion → execute)
+      echo "[$(date +%H:%M:%S)] Running Claude re-fix (sub-iteration $j/$MAX_SUBLOOP, step 1: opinion)..."
       REFIX_FILE="$LOG_DIR/refix-${i}-${j}.md"
+      REFIX_OPINION_FILE="$LOG_DIR/refix-opinion-${i}-${j}.md"
+      REFIX_SESSION_ID=$(python3 -c "import uuid; print(uuid.uuid4())")
 
       export REVIEW_JSON="$SELF_REVIEW_JSON"
       REFIX_PROMPT=$(envsubst < "$PROMPTS_DIR/claude-fix.prompt.md")
 
+      # Step 1: opinion
       if ! printf '%s' "$REFIX_PROMPT" | claude -p - \
+        --session-id "$REFIX_SESSION_ID" \
+        --allowedTools "Read,Glob,Grep,Bash" \
+        > "$REFIX_OPINION_FILE" 2>&1; then
+        echo "  Warning: re-fix opinion failed (sub-iteration $j). Continuing with current state."
+        SELF_REVIEW_SUMMARY="${SELF_REVIEW_SUMMARY}Sub-iteration $j: $SR_FINDINGS findings — re-fix failed\n"
+        break
+      fi
+
+      # Step 2: execute
+      echo "[$(date +%H:%M:%S)] Running Claude re-fix (sub-iteration $j/$MAX_SUBLOOP, step 2: execute)..."
+      REFIX_EXEC_PROMPT=$(cat "$PROMPTS_DIR/claude-fix-execute.prompt.md")
+
+      if ! printf '%s' "$REFIX_EXEC_PROMPT" | claude -p - \
+        --resume "$REFIX_SESSION_ID" \
         --allowedTools "Edit,Read,Glob,Grep,Bash" \
         > "$REFIX_FILE" 2>&1; then
-        echo "  Warning: re-fix failed (sub-iteration $j). Continuing with current state."
+        echo "  Warning: re-fix execute failed (sub-iteration $j). Continuing with current state."
         SELF_REVIEW_SUMMARY="${SELF_REVIEW_SUMMARY}Sub-iteration $j: $SR_FINDINGS findings — re-fix failed\n"
         break
       fi

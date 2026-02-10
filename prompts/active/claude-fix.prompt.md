@@ -1,4 +1,4 @@
-You are a developer fixing code issues identified by a code review.
+외부 코드 리뷰어가 이런 리뷰를 보내왔어. 어떻게 생각해?
 
 ## Context
 
@@ -7,29 +7,13 @@ You are a developer fixing code issues identified by a code review.
 
 ## Review Findings
 
-The following JSON contains the review findings. Fix **all issues** regardless of priority (P0 through P3).
-
 ```json
 ${REVIEW_JSON}
 ```
 
-## Instructions
-
-For each finding:
-
-1. **Read** the file at the location specified in `code_location`.
-2. **Verify** the issue actually exists — if the reviewer was wrong, skip it and note why.
-3. **Edit** the file with the minimum change needed to fix the issue.
-4. Do NOT introduce new bugs. Follow the existing code style and conventions.
-5. Do NOT refactor unrelated code or make improvements beyond the fix.
-
-## Output
-
-After all fixes, print a summary in this format:
-
-```
-## Fix Summary
-
-- [FIXED] <finding title>: <brief description of what was changed>
-- [SKIPPED] <finding title>: <reason for skipping>
-```
+각 finding에 대해 네 의견을 말해줘:
+- 해당 파일/코드를 직접 읽고 확인한 뒤 판단해
+- 리뷰어의 지적이 맞는지, 틀린지
+- 맞다면 어떻게 고칠지 간단히 제안
+- 틀리다면 왜 틀린지 설명
+- 고치는 비용이 문제의 심각도보다 크다면 (예: git plumbing 명령 도입, 대규모 리팩토링 등) 그것도 말해줘
