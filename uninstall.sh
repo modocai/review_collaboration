@@ -29,6 +29,11 @@ if [[ -d "$TARGET_DIR/.review-loop" ]]; then
   done
   rmdir "$TARGET_DIR/.review-loop/prompts/active" 2>/dev/null && echo "Removed empty .review-loop/prompts/active/" || true
   rmdir "$TARGET_DIR/.review-loop/prompts" 2>/dev/null && echo "Removed empty .review-loop/prompts/" || true
+  # logs/ (runtime artifacts)
+  if [[ -d "$TARGET_DIR/.review-loop/logs" ]]; then
+    rm -rf "$TARGET_DIR/.review-loop/logs"
+    echo "Removed .review-loop/logs/"
+  fi
   # .reviewlooprc.example
   if [[ -f "$TARGET_DIR/.review-loop/.reviewlooprc.example" ]]; then
     rm "$TARGET_DIR/.review-loop/.reviewlooprc.example"
