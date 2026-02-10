@@ -75,11 +75,12 @@ if [[ -f "$GITIGNORE" ]] && grep -qxF "$MARKER" "$GITIGNORE"; then
   TMP_GITIGNORE=$(mktemp)
   awk -v marker="$MARKER" '
     $0 == marker { skip=1; next }
-    skip && /^\.review-loop\/$/ { next }
+    skip && /^[[:space:]]*$/ { next }
+    skip && /^\.review-loop\/$/ { skip=0; next }
     { skip=0; print }
   ' "$GITIGNORE" > "$TMP_GITIGNORE"
   # Remove trailing blank lines
-  sed -e :a -e '/^\n*$/{$d;N;ba' -e '}' "$TMP_GITIGNORE" > "$GITIGNORE"
+  perl -0777 -pe 's/\n+\z/\n/' "$TMP_GITIGNORE" > "$GITIGNORE"
   rm -f "$TMP_GITIGNORE"
   echo "Removed review-loop entries from .gitignore"
   # Remove .gitignore if it became empty
@@ -94,13 +95,13 @@ LEGACY_MARKER="# AI review logs (added by review-loop installer)"
 if [[ -f "$GITIGNORE" ]] && grep -qxF "$LEGACY_MARKER" "$GITIGNORE"; then
   TMP_GITIGNORE=$(mktemp)
   awk '
-    /^# AI review logs \(added by review-loop installer\)$/ { marker=1; next }
-    marker && /^\.ai-review-logs\/$/ { marker=0; next }
-    { if (marker) print "# AI review logs (added by review-loop installer)"; marker=0; print }
-    END { if (marker) print "# AI review logs (added by review-loop installer)" }
+    /^# AI review logs \(added by review-loop installer\)$/ { skip=1; next }
+    skip && /^[[:space:]]*$/ { next }
+    skip && /^\.ai-review-logs\/$/ { skip=0; next }
+    { skip=0; print }
   ' "$GITIGNORE" > "$TMP_GITIGNORE"
   # Remove trailing blank lines
-  sed -e :a -e '/^\n*$/{$d;N;ba' -e '}' "$TMP_GITIGNORE" > "$GITIGNORE"
+  perl -0777 -pe 's/\n+\z/\n/' "$TMP_GITIGNORE" > "$GITIGNORE"
   rm -f "$TMP_GITIGNORE"
   echo "Removed .ai-review-logs/ from .gitignore"
   # Remove .gitignore if it became empty

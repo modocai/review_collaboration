@@ -160,8 +160,7 @@ CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 # Allow .gitignore/.reviewlooprc to be dirty — the installer modifies .gitignore
 # and the user may have an untracked .reviewlooprc.  Pre-existing dirty files
 # are snapshot-ed before each fix and excluded from commits (see step h).
-_dirty_files=$(git diff --name-only)
-_dirty_non_gitignore=$(echo "$_dirty_files" | grep -v '^\.gitignore$' || true)
+_dirty_non_gitignore=$(git diff --name-only | grep -v '^\.gitignore$' || true)
 _untracked_non_gitignore=$(git ls-files --others --exclude-standard | grep -v -E '^(\.gitignore|\.reviewlooprc)$' || true)
 _staged_non_gitignore=$(git diff --cached --name-only | grep -v '^\.gitignore$' || true)
 if [[ -n "$_dirty_non_gitignore" ]] || [[ -n "$_staged_non_gitignore" ]] || [[ -n "$_untracked_non_gitignore" ]]; then
@@ -172,7 +171,7 @@ if [[ -n "$_dirty_non_gitignore" ]] || [[ -n "$_staged_non_gitignore" ]] || [[ -
   echo ""
   exit 1
 fi
-unset _dirty_files _dirty_non_gitignore _staged_non_gitignore _untracked_non_gitignore
+unset _dirty_non_gitignore _staged_non_gitignore _untracked_non_gitignore
 
 LOG_DIR="$SCRIPT_DIR/../logs"
 mkdir -p "$LOG_DIR"
@@ -328,6 +327,7 @@ EOF
     > "$OPINION_FILE" 2>&1; then
     echo "  Error: Claude opinion failed (iteration $i). See $OPINION_FILE for details."
     FINAL_STATUS="claude_error"
+    rm -f "$PRE_FIX_STATE"
     break
   fi
   echo "  Opinion saved to $OPINION_FILE"
@@ -342,6 +342,7 @@ EOF
     > "$FIX_FILE" 2>&1; then
     echo "  Error: Claude fix-execute failed (iteration $i). See $FIX_FILE for details."
     FINAL_STATUS="claude_error"
+    rm -f "$PRE_FIX_STATE"
     break
   fi
 
@@ -546,65 +547,45 @@ Self-review: $(printf '%b' "$SELF_REVIEW_SUMMARY" | tr '\n' '; ' | sed 's/; $//'
       fi
     fi
 
-    # Build opinion section (Claude's assessment of review findings)
-    OPINION_SECTION=""
+    # Build comment body in a temp file to avoid heredoc delimiter
+    # collisions and ARG_MAX limits with --body.
+    COMMENT_BODY_FILE=$(mktemp)
+
+    printf '### AI Review — Iteration %d / %d\n\n' "$i" "$MAX_LOOP" > "$COMMENT_BODY_FILE"
+    printf '**Overall**: %s (%s findings)\n\n' "$OVERALL" "$FINDINGS_COUNT" >> "$COMMENT_BODY_FILE"
+
+    # Findings table
+    printf '<details>\n<summary>Review Findings</summary>\n\n' >> "$COMMENT_BODY_FILE"
+    printf '| Finding | Confidence | Location |\n' >> "$COMMENT_BODY_FILE"
+    printf '|---------|-----------|----------|\n' >> "$COMMENT_BODY_FILE"
+    printf '%s\n' "$FINDINGS_TABLE" >> "$COMMENT_BODY_FILE"
+    printf '\n</details>\n\n' >> "$COMMENT_BODY_FILE"
+
+    # Fix summary
+    printf '<details>\n<summary>Fix Actions</summary>\n\n' >> "$COMMENT_BODY_FILE"
+    printf '%s\n' "$FIX_SUMMARY" >> "$COMMENT_BODY_FILE"
+    printf '\n</details>\n' >> "$COMMENT_BODY_FILE"
+
+    # Opinion section (conditional)
     if [[ -f "$OPINION_FILE" ]] && [[ -s "$OPINION_FILE" ]]; then
-      # Truncate to first 2000 chars to keep PR comment reasonable
-      OPINION_EXCERPT=$(head -c 2000 "$OPINION_FILE")
-      OPINION_SECTION=$(cat <<OPEOF
-
-<details>
-<summary>Claude Opinion</summary>
-
-$OPINION_EXCERPT
-
-</details>
-OPEOF
-)
+      printf '\n<details>\n<summary>Claude Opinion</summary>\n\n' >> "$COMMENT_BODY_FILE"
+      head -c 2000 "$OPINION_FILE" >> "$COMMENT_BODY_FILE"
+      printf '\n\n</details>\n' >> "$COMMENT_BODY_FILE"
     fi
 
-    # Build self-review section
-    SELF_REVIEW_SECTION=""
+    # Self-review section (conditional)
     if [[ -n "$SELF_REVIEW_SUMMARY" ]]; then
-      SELF_REVIEW_SECTION=$(cat <<SREOF
-
-<details>
-<summary>Self-Review ($MAX_SUBLOOP max sub-iterations)</summary>
-
-$(printf '%b' "$SELF_REVIEW_SUMMARY")
-</details>
-SREOF
-)
+      printf '\n<details>\n<summary>Self-Review (%d max sub-iterations)</summary>\n\n' "$MAX_SUBLOOP" >> "$COMMENT_BODY_FILE"
+      printf '%b\n' "$SELF_REVIEW_SUMMARY" >> "$COMMENT_BODY_FILE"
+      printf '</details>\n' >> "$COMMENT_BODY_FILE"
     fi
 
-    COMMENT_BODY=$(cat <<EOF
-### AI Review — Iteration $i / $MAX_LOOP
-
-**Overall**: $OVERALL ($FINDINGS_COUNT findings)
-
-<details>
-<summary>Review Findings</summary>
-
-| Finding | Confidence | Location |
-|---------|-----------|----------|
-$FINDINGS_TABLE
-
-</details>
-
-<details>
-<summary>Fix Actions</summary>
-
-$FIX_SUMMARY
-
-</details>
-${OPINION_SECTION}${SELF_REVIEW_SECTION}
-EOF
-)
-    if gh pr comment "$PR_NUMBER" --body "$COMMENT_BODY"; then
+    if gh pr comment "$PR_NUMBER" --body-file "$COMMENT_BODY_FILE"; then
       echo "  PR comment posted."
     else
       echo "  Warning: failed to post PR comment (non-fatal)."
     fi
+    rm -f "$COMMENT_BODY_FILE"
   fi
 
   echo ""
