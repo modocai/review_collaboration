@@ -304,7 +304,7 @@ EOF
   } | sort -uz | while IFS= read -r -d '' _f; do
     [[ -n "$_f" ]] || continue
     if [[ -f "$_f" ]]; then
-      printf '%s\t%s\n' "$(git hash-object "$_f" 2>/dev/null || echo UNHASHABLE)" "$_f"
+      printf '%s\t%s\n' "$(git hash-object -w "$_f" 2>/dev/null || echo UNHASHABLE)" "$_f"
     else
       printf 'DELETED\t%s\n' "$_f"
     fi
@@ -430,6 +430,7 @@ EOF
     # Only files that are newly dirty or have different content are committed,
     # so pre-existing changes (e.g. installer's .gitignore) are never swept in.
     FIX_FILES_NUL_FILE=$(mktemp)
+    _pre_dirty_fix_file=$(mktemp)
     _post_dirty=$(mktemp)
     { git diff -z --name-only; git diff -z --cached --name-only; git ls-files -z --others --exclude-standard; } | sort -uz > "$_post_dirty"
     while IFS= read -r -d '' _f; do
@@ -443,14 +444,31 @@ EOF
       _pre_hash=$(awk -F'\t' -v f="$_f" '$2 == f { print $1; exit }' "$PRE_FIX_STATE")
       if [[ -z "$_pre_hash" ]] || [[ "$_cur_hash" != "$_pre_hash" ]]; then
         printf '%s\0' "$_f"
+        # Track files that were already dirty before Claude — their pre-fix
+        # blob must be loaded into the index first so that git-add only stages
+        # Claude's delta, not the pre-existing hunks.
+        if [[ -n "$_pre_hash" ]] && [[ "$_pre_hash" != "UNHASHABLE" ]] && [[ "$_pre_hash" != "DELETED" ]]; then
+          printf '%s\t%s\0' "$_pre_hash" "$_f" >> "$_pre_dirty_fix_file"
+        fi
       fi
     done < "$_post_dirty" > "$FIX_FILES_NUL_FILE"
     rm -f "$_post_dirty"
     if [[ ! -s "$FIX_FILES_NUL_FILE" ]]; then
       echo "  No file changes after fix — nothing to commit."
-      rm -f "$FIX_FILES_NUL_FILE"
+      rm -f "$FIX_FILES_NUL_FILE" "$_pre_dirty_fix_file"
     else
       echo "[$(date +%H:%M:%S)] Committing fixes..."
+      # For files that were already dirty before Claude, seed the index with
+      # their pre-fix blob so git-add only stages Claude's changes.
+      if [[ -s "$_pre_dirty_fix_file" ]]; then
+        while IFS=$'\t' read -r -d '' _blob _path; do
+          [[ -n "$_blob" ]] || continue
+          _mode=$(git ls-files --stage -- "$_path" 2>/dev/null | awk '{print $1; exit}')
+          : "${_mode:=100644}"
+          git update-index --cacheinfo "$_mode,$_blob,$_path" 2>/dev/null || true
+        done < "$_pre_dirty_fix_file"
+      fi
+      rm -f "$_pre_dirty_fix_file"
       xargs -0 git add -- < "$FIX_FILES_NUL_FILE"
       COMMIT_MSG="fix(ai-review): apply iteration $i fixes
 
