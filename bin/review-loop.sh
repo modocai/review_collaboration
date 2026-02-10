@@ -313,7 +313,7 @@ EOF
     for (( j=1; j<=MAX_SUBLOOP; j++ )); do
       # Check if there are any working tree changes to review
       # Must consider unstaged edits, staged changes, and untracked files
-      if git diff --quiet && git diff --cached --quiet && [[ -z "$(git ls-files --others --exclude-standard)" ]]; then
+      if git diff --quiet && git diff --cached --quiet && [[ -z "$(git ls-files --others --exclude-standard | grep -v -E '^(\.gitignore|\.reviewlooprc)$')" ]]; then
         echo "  No working tree changes — skipping self-review."
         break
       fi
@@ -336,6 +336,11 @@ EOF
 
       # JSON parsing (same logic as codex review)
       SELF_REVIEW_JSON=""
+      if [[ ! -s "$SELF_REVIEW_FILE" ]]; then
+        echo "  Warning: self-review produced empty output (sub-iteration $j). Continuing with current fixes."
+        SELF_REVIEW_SUMMARY="${SELF_REVIEW_SUMMARY}Sub-iteration $j: empty output\n"
+        break
+      fi
       if jq empty "$SELF_REVIEW_FILE" 2>/dev/null; then
         SELF_REVIEW_JSON=$(cat "$SELF_REVIEW_FILE")
       else
