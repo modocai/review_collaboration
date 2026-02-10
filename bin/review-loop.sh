@@ -342,7 +342,7 @@ EOF
   # Step 1: Ask Claude's opinion (read-only, no edit tools)
   if ! printf '%s' "$FIX_PROMPT" | claude -p - \
     --session-id "$FIX_SESSION_ID" \
-    --allowedTools "Read,Glob,Grep,Bash" \
+    --allowedTools "Read,Glob,Grep" \
     > "$OPINION_FILE" 2>&1; then
     echo "  Error: Claude opinion failed (iteration $i). See $OPINION_FILE for details."
     FINAL_STATUS="claude_error"
@@ -408,7 +408,7 @@ EOF
 
       # Claude self-review — tool access for git diff, file reading, etc.
       if ! printf '%s' "$SELF_REVIEW_PROMPT" | claude -p - \
-        --allowedTools "Read,Glob,Grep,Bash" \
+        --allowedTools "Read,Glob,Grep" \
         > "$SELF_REVIEW_FILE" 2>&1; then
         echo "  Warning: self-review failed (sub-iteration $j). Continuing with current fixes."
         SELF_REVIEW_SUMMARY="${SELF_REVIEW_SUMMARY}Sub-iteration $j: self-review failed\n"
@@ -459,7 +459,7 @@ EOF
       # Step 1: opinion
       if ! printf '%s' "$REFIX_PROMPT" | claude -p - \
         --session-id "$REFIX_SESSION_ID" \
-        --allowedTools "Read,Glob,Grep,Bash" \
+        --allowedTools "Read,Glob,Grep" \
         > "$REFIX_OPINION_FILE" 2>&1; then
         echo "  Warning: re-fix opinion failed (sub-iteration $j). Continuing with current state."
         SELF_REVIEW_SUMMARY="${SELF_REVIEW_SUMMARY}Sub-iteration $j: $SR_FINDINGS findings — re-fix failed\n"
@@ -514,7 +514,7 @@ EOF
       rm -f "$FIX_FILES_NUL_FILE"
     else
       echo "[$(date +%H:%M:%S)] Committing fixes..."
-      git reset --quiet HEAD 2>/dev/null || true
+      xargs -0 git reset --quiet HEAD -- < "$FIX_FILES_NUL_FILE" 2>/dev/null || true
       xargs -0 git add -- < "$FIX_FILES_NUL_FILE"
       COMMIT_MSG="fix(ai-review): apply iteration $i fixes
 
