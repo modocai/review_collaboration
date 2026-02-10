@@ -423,6 +423,12 @@ Self-review: $(printf '%b' "$SELF_REVIEW_SUMMARY" | tr '\n' '; ' | sed 's/; $//'
     echo "  AUTO_COMMIT is disabled — skipping commit and push."
   fi
 
+  # Stop after first iteration when auto-commit is off (fixes applied but not committed)
+  if [[ "$AUTO_COMMIT" != true ]]; then
+    FINAL_STATUS="auto_commit_disabled"
+    break
+  fi
+
   # ── i. Post iteration summary as PR comment ─────────────────────
   if [[ -n "$PR_NUMBER" ]]; then
     echo "[$(date +%H:%M:%S)] Posting PR comment..."
@@ -485,12 +491,6 @@ EOF
     else
       echo "  Warning: failed to post PR comment (non-fatal)."
     fi
-  fi
-
-  # Stop after first iteration when auto-commit is off (fixes applied but not committed)
-  if [[ "$AUTO_COMMIT" != true ]]; then
-    FINAL_STATUS="auto_commit_disabled"
-    break
   fi
 
   echo ""
