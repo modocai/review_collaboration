@@ -214,7 +214,7 @@ echo "════════════════════════�
 echo ""
 
 # ── Pre-loop validation ───────────────────────────────────────────────
-if [[ ! -f "$PROMPTS_DIR/claude-fix-execute.prompt.md" ]]; then
+if [[ "$DRY_RUN" == false ]] && [[ ! -f "$PROMPTS_DIR/claude-fix-execute.prompt.md" ]]; then
   echo "Error: required prompt not found: $PROMPTS_DIR/claude-fix-execute.prompt.md" >&2
   exit 1
 fi
