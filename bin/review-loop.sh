@@ -305,10 +305,15 @@ EOF
   # ── g2. Claude self-review sub-loop ─────────────────────────────
   SELF_REVIEW_SUMMARY=""
   ORIGINAL_REVIEW_JSON="$REVIEW_JSON"
+  if [[ "$MAX_SUBLOOP" -gt 0 ]] && [[ ! -f "$PROMPTS_DIR/claude-self-review.prompt.md" ]]; then
+    echo "  Warning: self-review prompt not found at $PROMPTS_DIR/claude-self-review.prompt.md — disabling self-review."
+    MAX_SUBLOOP=0
+  fi
   if [[ "$MAX_SUBLOOP" -gt 0 ]]; then
     for (( j=1; j<=MAX_SUBLOOP; j++ )); do
       # Check if there are any working tree changes to review
-      if git diff --quiet; then
+      # Must consider unstaged edits, staged changes, and untracked files
+      if git diff --quiet && git diff --cached --quiet && [[ -z "$(git ls-files --others --exclude-standard)" ]]; then
         echo "  No working tree changes — skipping self-review."
         break
       fi
