@@ -157,7 +157,9 @@ fi
 CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 
 # ── Clean working tree check ────────────────────────────────────────
-# Allow .gitignore to be dirty — the installer modifies it to add .review-loop/
+# Allow .gitignore/.reviewlooprc to be dirty — the installer modifies .gitignore
+# and the user may have an untracked .reviewlooprc.  Pre-existing dirty files
+# are snapshot-ed before each fix and excluded from commits (see step h).
 _dirty_files=$(git diff --name-only)
 _dirty_non_gitignore=$(echo "$_dirty_files" | grep -v '^\.gitignore$' || true)
 _untracked_non_gitignore=$(git ls-files --others --exclude-standard | grep -v -E '^(\.gitignore|\.reviewlooprc)$' || true)
@@ -285,6 +287,23 @@ EOF
     break
   fi
 
+  # ── Snapshot pre-fix working tree state ──────────────────────────
+  # Record every dirty/untracked file with its content hash so that step h
+  # can distinguish pre-existing changes from Claude's fixes.
+  PRE_FIX_STATE=$(mktemp)
+  {
+    git diff --name-only
+    git diff --cached --name-only
+    git ls-files --others --exclude-standard
+  } | sort -u | while IFS= read -r _f; do
+    [[ -n "$_f" ]] || continue
+    if [[ -f "$_f" ]]; then
+      printf '%s\t%s\n' "$(git hash-object "$_f")" "$_f"
+    else
+      printf 'DELETED\t%s\n' "$_f"
+    fi
+  done > "$PRE_FIX_STATE"
+
   # ── g. Claude fix ────────────────────────────────────────────────
   echo "[$(date +%H:%M:%S)] Running Claude fix..."
   FIX_FILE="$LOG_DIR/fix-${i}.md"
@@ -311,10 +330,27 @@ EOF
   fi
   if [[ "$MAX_SUBLOOP" -gt 0 ]]; then
     for (( j=1; j<=MAX_SUBLOOP; j++ )); do
-      # Check if there are any working tree changes to review
-      # Must consider unstaged edits, staged changes, and untracked files
-      if [[ -z "$(git diff --name-only | grep -v '^\.gitignore$')" ]] && [[ -z "$(git diff --cached --name-only | grep -v '^\.gitignore$')" ]] && [[ -z "$(git ls-files --others --exclude-standard | grep -v -E '^(\.gitignore|\.reviewlooprc)$')" ]]; then
-        echo "  No working tree changes — skipping self-review."
+      # Check if Claude's fix produced any changes vs pre-fix snapshot
+      _fix_dirty=$(mktemp)
+      { git diff --name-only; git diff --cached --name-only; git ls-files --others --exclude-standard; } | sort -u > "$_fix_dirty"
+      _has_fix_changes=false
+      while IFS= read -r _f; do
+        [[ -n "$_f" ]] || continue
+        [[ "$_f" == .review-loop/logs/* ]] && continue
+        if [[ -f "$_f" ]]; then
+          _cur_hash=$(git hash-object "$_f")
+        else
+          _cur_hash="DELETED"
+        fi
+        _pre_hash=$(awk -F'\t' -v f="$_f" '$2 == f { print $1; exit }' "$PRE_FIX_STATE")
+        if [[ -z "$_pre_hash" ]] || [[ "$_cur_hash" != "$_pre_hash" ]]; then
+          _has_fix_changes=true
+          break
+        fi
+      done < "$_fix_dirty"
+      rm -f "$_fix_dirty"
+      if [[ "$_has_fix_changes" == false ]]; then
+        echo "  No working tree changes from fix — skipping self-review."
         break
       fi
 
@@ -388,10 +424,26 @@ EOF
 
   # ── h. Commit & push fixes ──────────────────────────────────────
   if [[ "$AUTO_COMMIT" == true ]]; then
-    # Collect changed/new files as NUL-delimited list for whitespace safety.
-    # Use a temp file because Bash strips NUL bytes in command substitution.
+    # Select files changed by Claude (compare against pre-fix snapshot).
+    # Only files that are newly dirty or have different content are committed,
+    # so pre-existing changes (e.g. installer's .gitignore) are never swept in.
     FIX_FILES_NUL_FILE=$(mktemp)
-    { git diff --name-only -z; git diff --cached --name-only -z; git ls-files --others --exclude-standard -z; } | tr '\0' '\n' | sort -u | { grep -v -E '^\.review-loop/logs/.*$' || true; } | tr '\n' '\0' > "$FIX_FILES_NUL_FILE"
+    _post_dirty=$(mktemp)
+    { git diff --name-only; git diff --cached --name-only; git ls-files --others --exclude-standard; } | sort -u > "$_post_dirty"
+    while IFS= read -r _f; do
+      [[ -n "$_f" ]] || continue
+      [[ "$_f" == .review-loop/logs/* ]] && continue
+      if [[ -f "$_f" ]]; then
+        _cur_hash=$(git hash-object "$_f")
+      else
+        _cur_hash="DELETED"
+      fi
+      _pre_hash=$(awk -F'\t' -v f="$_f" '$2 == f { print $1; exit }' "$PRE_FIX_STATE")
+      if [[ -z "$_pre_hash" ]] || [[ "$_cur_hash" != "$_pre_hash" ]]; then
+        printf '%s\0' "$_f"
+      fi
+    done < "$_post_dirty" > "$FIX_FILES_NUL_FILE"
+    rm -f "$_post_dirty"
     if [[ ! -s "$FIX_FILES_NUL_FILE" ]]; then
       echo "  No file changes after fix — nothing to commit."
       rm -f "$FIX_FILES_NUL_FILE"
@@ -422,6 +474,7 @@ Self-review: $(printf '%b' "$SELF_REVIEW_SUMMARY" | tr '\n' '; ' | sed 's/; $//'
   else
     echo "  AUTO_COMMIT is disabled — skipping commit and push."
   fi
+  rm -f "$PRE_FIX_STATE"
 
   # Stop after first iteration when auto-commit is off (fixes applied but not committed)
   if [[ "$AUTO_COMMIT" != true ]]; then
