@@ -10,6 +10,11 @@ if [[ ! -d "$TARGET_DIR" ]]; then
 fi
 TARGET_DIR=$(cd "$TARGET_DIR" && pwd)
 
+if ! command -v perl &>/dev/null; then
+  echo "Error: 'perl' is required for uninstall but not found."
+  exit 1
+fi
+
 echo "Uninstalling review-loop from: $TARGET_DIR"
 
 # Remove installer-owned files inside .review-loop/ (current layout)

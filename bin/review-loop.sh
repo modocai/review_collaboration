@@ -514,7 +514,7 @@ EOF
       rm -f "$FIX_FILES_NUL_FILE"
     else
       echo "[$(date +%H:%M:%S)] Committing fixes..."
-      xargs -0 git reset --quiet HEAD -- < "$FIX_FILES_NUL_FILE" 2>/dev/null || true
+      git reset --quiet HEAD 2>/dev/null || true
       xargs -0 git add -- < "$FIX_FILES_NUL_FILE"
       COMMIT_MSG="fix(ai-review): apply iteration $i fixes
 
