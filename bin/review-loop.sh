@@ -402,9 +402,13 @@ EOF
       echo "[$(date +%H:%M:%S)] Running Claude self-review (sub-iteration $j/$MAX_SUBLOOP)..."
       SELF_REVIEW_FILE="$LOG_DIR/self-review-${i}-${j}.json"
 
+      # Dump current diff so the self-review agent can read it (no Bash needed)
+      export DIFF_FILE="$LOG_DIR/diff-${i}-${j}.diff"
+      git diff > "$DIFF_FILE"
+
       # Ensure self-review prompt always references the original Codex findings
       export REVIEW_JSON="$ORIGINAL_REVIEW_JSON"
-      SELF_REVIEW_PROMPT=$(envsubst '$CURRENT_BRANCH $TARGET_BRANCH $ITERATION $REVIEW_JSON' < "$PROMPTS_DIR/claude-self-review.prompt.md")
+      SELF_REVIEW_PROMPT=$(envsubst '$CURRENT_BRANCH $TARGET_BRANCH $ITERATION $REVIEW_JSON $DIFF_FILE' < "$PROMPTS_DIR/claude-self-review.prompt.md")
 
       # Claude self-review — tool access for git diff, file reading, etc.
       if ! printf '%s' "$SELF_REVIEW_PROMPT" | claude -p - \

@@ -16,7 +16,7 @@ ${REVIEW_JSON}
 
 ## Instructions
 
-1. Run `git diff` to see the uncommitted changes the AI developer just made.
+1. Read the diff file at `${DIFF_FILE}` to see the uncommitted changes the AI developer just made.
 2. For each changed file, read the surrounding code for context if needed.
 3. Review the changes according to the guidelines below.
 
