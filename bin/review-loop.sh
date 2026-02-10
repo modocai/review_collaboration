@@ -265,7 +265,7 @@ for (( i=1; i<=MAX_LOOP; i++ )); do
     REVIEW_JSON=$(cat "$REVIEW_FILE")
   else
     # Extract JSON from markdown fences or mixed text
-    REVIEW_JSON=$(sed -n '/^```[a-zA-Z]*$/,/^```$/{ /^```/d; p; }' "$REVIEW_FILE")
+    REVIEW_JSON=$(sed -n '/^```json$/,/^```$/{ /^```/d; p; }' "$REVIEW_FILE")
     # Fallback: find first { ... } block
     if ! echo "$REVIEW_JSON" | jq empty 2>/dev/null; then
       REVIEW_JSON=$(perl -0777 -ne 'print $1 if /(\{.*\})/s' "$REVIEW_FILE" 2>/dev/null || true)
@@ -514,7 +514,7 @@ EOF
       rm -f "$FIX_FILES_NUL_FILE"
     else
       echo "[$(date +%H:%M:%S)] Committing fixes..."
-      git reset --quiet HEAD 2>/dev/null || true
+      xargs -0 git reset --quiet HEAD -- < "$FIX_FILES_NUL_FILE" 2>/dev/null || true
       xargs -0 git add -- < "$FIX_FILES_NUL_FILE"
       COMMIT_MSG="fix(ai-review): apply iteration $i fixes
 
