@@ -28,7 +28,7 @@ if [[ -f "$TARGET_DIR/bin/review-loop.sh" ]]; then
   echo "Removed bin/review-loop.sh"
   rmdir "$TARGET_DIR/bin" 2>/dev/null && echo "Removed empty bin/" || true
 fi
-for _pfile in codex-review.prompt.md claude-fix.prompt.md; do
+for _pfile in codex-review.prompt.md claude-fix.prompt.md claude-self-review.prompt.md; do
   if [[ -f "$TARGET_DIR/prompts/active/$_pfile" ]]; then
     rm "$TARGET_DIR/prompts/active/$_pfile"
     echo "Removed prompts/active/$_pfile"
