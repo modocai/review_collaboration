@@ -403,6 +403,8 @@ EOF
       SELF_REVIEW_FILE="$LOG_DIR/self-review-${i}-${j}.json"
 
       # Dump diff for only files changed by the fix (exclude pre-existing dirty files)
+      # Stage untracked files as intent-to-add so git diff HEAD can see them
+      xargs -0 git add --intent-to-add -- < "$_fix_files_tmp" 2>/dev/null || true
       export DIFF_FILE="$LOG_DIR/diff-${i}-${j}.diff"
       xargs -0 git diff HEAD -- < "$_fix_files_tmp" > "$DIFF_FILE"
       rm -f "$_fix_files_tmp"
