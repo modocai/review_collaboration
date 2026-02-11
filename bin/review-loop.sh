@@ -181,13 +181,15 @@ CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 _dirty_non_gitignore=$(git diff --name-only | grep -v -E '^(\.gitignore|\.reviewlooprc)$' || true)
 _untracked_non_gitignore=$(git ls-files --others --exclude-standard | grep -v -E '^(\.gitignore|\.reviewlooprc)$' || true)
 _staged_non_gitignore=$(git diff --cached --name-only | grep -v -E '^(\.gitignore|\.reviewlooprc)$' || true)
-if [[ -n "$_dirty_non_gitignore" ]] || [[ -n "$_staged_non_gitignore" ]] || [[ -n "$_untracked_non_gitignore" ]]; then
-  echo "Error: working tree is not clean. Commit or stash your changes before running review-loop."
-  echo ""
-  echo "  git stash        # stash changes"
-  echo "  git commit -am …  # or commit them"
-  echo ""
-  exit 1
+if [[ "$DRY_RUN" == false ]]; then
+  if [[ -n "$_dirty_non_gitignore" ]] || [[ -n "$_staged_non_gitignore" ]] || [[ -n "$_untracked_non_gitignore" ]]; then
+    echo "Error: working tree is not clean. Commit or stash your changes before running review-loop."
+    echo ""
+    echo "  git stash        # stash changes"
+    echo "  git commit -am …  # or commit them"
+    echo ""
+    exit 1
+  fi
 fi
 unset _dirty_non_gitignore _staged_non_gitignore _untracked_non_gitignore
 

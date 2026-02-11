@@ -39,6 +39,7 @@ npm install -g @anthropic-ai/claude-code  # Claude Code CLI
 - [jq](https://jqlang.github.io/jq/) — JSON processor
 - [gh](https://cli.github.com/) — GitHub CLI (optional, for PR comments)
 - [envsubst](https://www.gnu.org/software/gettext/) — part of GNU gettext (macOS: `brew install gettext`)
+- [perl](https://www.perl.org/) — used for JSON extraction and deduplication (pre-installed on macOS and most Linux)
 - git
 
 ## Quick Start
