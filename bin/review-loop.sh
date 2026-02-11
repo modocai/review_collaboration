@@ -409,6 +409,8 @@ EOF
       xargs -0 git add --intent-to-add -- < "$_fix_files_tmp" 2>/dev/null || true
       export DIFF_FILE="$LOG_DIR/diff-${i}-${j}.diff"
       xargs -0 git diff HEAD -- < "$_fix_files_tmp" > "$DIFF_FILE"
+      # Immediately undo intent-to-add so we never clobber pre-existing staged state
+      xargs -0 git reset --quiet -- < "$_fix_files_tmp" 2>/dev/null || true
       rm -f "$_fix_files_tmp"
 
       # Ensure self-review prompt always references the original Codex findings
@@ -492,9 +494,6 @@ EOF
     done
   fi
   export REVIEW_JSON="$ORIGINAL_REVIEW_JSON"
-
-  # Clean up any intent-to-add index entries left by self-review diff
-  git reset --quiet 2>/dev/null || true
 
   # ── h. Commit & push fixes ──────────────────────────────────────
   if [[ "$AUTO_COMMIT" == true ]]; then
