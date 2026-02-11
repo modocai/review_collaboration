@@ -149,8 +149,10 @@ _gen_uuid() {
   elif command -v python3 &>/dev/null; then
     python3 -c 'import uuid; print(uuid.uuid4())'
   else
-    # Last resort: timestamp + two independent $RANDOM calls (30-bit entropy)
-    printf '%s-%04x%04x' "$(date +%s)" $RANDOM $RANDOM
+    # Last resort: build a valid v4 UUID from $RANDOM (15-bit each)
+    printf '%04x%04x-%04x-4%03x-%04x-%04x%04x%04x' \
+      $RANDOM $RANDOM $RANDOM $(( RANDOM & 0x0FFF )) \
+      $(( (RANDOM & 0x3FFF) | 0x8000 )) $RANDOM $RANDOM $RANDOM
   fi
 }
 
@@ -490,6 +492,9 @@ EOF
     done
   fi
   export REVIEW_JSON="$ORIGINAL_REVIEW_JSON"
+
+  # Clean up any intent-to-add index entries left by self-review diff
+  git reset --quiet 2>/dev/null || true
 
   # ── h. Commit & push fixes ──────────────────────────────────────
   if [[ "$AUTO_COMMIT" == true ]]; then
