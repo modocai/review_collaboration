@@ -283,7 +283,7 @@ for (( i=1; i<=MAX_LOOP; i++ )); do
     REVIEW_JSON=$(cat "$REVIEW_FILE")
   else
     # Extract JSON from markdown fences or mixed text
-    REVIEW_JSON=$(sed -n '/^```json$/,/^```$/{ /^```/d; p; }' "$REVIEW_FILE")
+    REVIEW_JSON=$(sed -n '/^```\(json\)\{0,1\}$/,/^```$/{ /^```/d; p; }' "$REVIEW_FILE")
     # Fallback: find first { ... } block
     if [[ -z "$REVIEW_JSON" ]] || ! printf '%s' "$REVIEW_JSON" | jq empty 2>/dev/null; then
       REVIEW_JSON=$(perl -0777 -ne 'print $1 if /(\{.*\})/s' "$REVIEW_FILE" 2>/dev/null || true)
@@ -587,6 +587,7 @@ Self-review: $(printf '%b' "$SELF_REVIEW_SUMMARY" | tr '\n' '; ' | sed 's/; $//'
   fi
   rm -f "$PRE_FIX_STATE"
   _cleanup_stash
+  [[ "$FINAL_STATUS" == "stash_conflict" ]] && break
 
   # Stop after first iteration when auto-commit is off (fixes applied but not committed)
   if [[ "$AUTO_COMMIT" != true ]]; then
