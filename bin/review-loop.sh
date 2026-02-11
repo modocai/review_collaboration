@@ -9,6 +9,7 @@ PROMPTS_DIR="$SCRIPT_DIR/../prompts/active"
 # ── Defaults ──────────────────────────────────────────────────────────
 TARGET_BRANCH="develop"
 MAX_LOOP=""
+MAX_SUBLOOP=2
 DRY_RUN=false
 AUTO_COMMIT=true
 
@@ -23,7 +24,7 @@ if [[ -n "$_GIT_ROOT" && -f "$_GIT_ROOT/$REVIEWLOOPRC" ]]; then
     # Skip blank lines and comments
     [[ -z "$_rc_line" || "$_rc_line" =~ ^[[:space:]]*# ]] && continue
     # Match KEY=VALUE (optionally quoted value); reject anything else
-    if [[ "$_rc_line" =~ ^[[:space:]]*(TARGET_BRANCH|MAX_LOOP|DRY_RUN|AUTO_COMMIT|PROMPTS_DIR)=[\"\']?([^\"\']*)[\"\']?[[:space:]]*$ ]]; then
+    if [[ "$_rc_line" =~ ^[[:space:]]*(TARGET_BRANCH|MAX_LOOP|MAX_SUBLOOP|DRY_RUN|AUTO_COMMIT|PROMPTS_DIR)=[\"\']?([^\"\']*)[\"\']?[[:space:]]*$ ]]; then
       _rc_val="${BASH_REMATCH[2]}"
       _rc_key="${BASH_REMATCH[1]}"
       # Trim trailing whitespace from unquoted values
@@ -57,6 +58,8 @@ Usage: review-loop.sh [OPTIONS]
 Options:
   -t, --target <branch>    Target branch to diff against (default: develop)
   -n, --max-loop <N>       Maximum review-fix iterations (required)
+  --max-subloop <N>        Maximum self-review sub-iterations per fix (default: 2)
+  --no-self-review         Disable self-review (equivalent to --max-subloop 0)
   --dry-run                Run review only, do not fix
   --no-dry-run             Force fixes even if .reviewlooprc sets DRY_RUN=true
   --no-auto-commit         Fix but do not commit/push (single iteration)
@@ -67,14 +70,16 @@ Options:
 Flow:
   1. Codex reviews diff (target...current)
   2. Claude fixes all issues (P0-P3)
-  3. Auto-commit & push fixes to update PR
-  4. Post review/fix summary as PR comment
-  5. Repeat until clean or max iterations
+  3. Claude self-reviews fixes, re-fixes if needed (up to --max-subloop times)
+  4. Auto-commit & push fixes to update PR
+  5. Post review/fix/self-review summary as PR comment
+  6. Repeat until clean or max iterations
 
 Examples:
   review-loop.sh -t main -n 3          # diff against main, max 3 loops
   review-loop.sh -n 5                  # diff against develop, max 5 loops
   review-loop.sh -n 1 --dry-run        # single review, no fixes
+  review-loop.sh -n 3 --no-self-review # disable self-review sub-loop
 EOF
   exit "${1:-0}"
 }
@@ -88,6 +93,10 @@ while [[ $# -gt 0 ]]; do
     -n|--max-loop)
       if [[ $# -lt 2 ]]; then echo "Error: '$1' requires an argument."; usage 1; fi
       MAX_LOOP="$2"; shift 2 ;;
+    --max-subloop)
+      if [[ $# -lt 2 ]]; then echo "Error: '$1' requires an argument."; usage 1; fi
+      MAX_SUBLOOP="$2"; shift 2 ;;
+    --no-self-review)  MAX_SUBLOOP=0; shift ;;
     --dry-run)         DRY_RUN=true; shift ;;
     --no-dry-run)      DRY_RUN=false; shift ;;
     --no-auto-commit)  AUTO_COMMIT=false; shift ;;
@@ -109,6 +118,11 @@ if ! [[ "$MAX_LOOP" =~ ^[1-9][0-9]*$ ]]; then
   exit 1
 fi
 
+if ! [[ "$MAX_SUBLOOP" =~ ^(0|[1-9][0-9]*)$ ]]; then
+  echo "Error: --max-subloop must be a non-negative integer (no leading zeros), got '$MAX_SUBLOOP'."
+  exit 1
+fi
+
 # ── Prerequisite checks ──────────────────────────────────────────────
 check_cmd() {
   if ! command -v "$1" &>/dev/null; then
@@ -124,6 +138,24 @@ if [[ "$DRY_RUN" == false ]]; then
 fi
 check_cmd jq
 check_cmd envsubst
+check_cmd perl
+
+# UUID generator with fallback chain: uuidgen → /proc → python3
+_gen_uuid() {
+  if command -v uuidgen &>/dev/null; then
+    uuidgen | tr '[:upper:]' '[:lower:]'
+  elif [[ -f /proc/sys/kernel/random/uuid ]]; then
+    cat /proc/sys/kernel/random/uuid
+  elif command -v python3 &>/dev/null; then
+    python3 -c 'import uuid; print(uuid.uuid4())'
+  else
+    # Last resort: build a valid v4 UUID from $RANDOM (15-bit each)
+    printf '%04x%04x-%04x-4%03x-%04x-%04x%04x%04x' \
+      $RANDOM $RANDOM $RANDOM $(( RANDOM & 0x0FFF )) \
+      $(( (RANDOM & 0x3FFF) | 0x8000 )) $RANDOM $RANDOM $RANDOM
+  fi
+}
+
 HAS_GH=true
 if ! command -v gh &>/dev/null; then
   HAS_GH=false
@@ -141,10 +173,30 @@ if ! git rev-parse --verify "$TARGET_BRANCH" &>/dev/null; then
 fi
 
 CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
-LOG_DIR=".ai-review-logs"
+
+# ── Clean working tree check ────────────────────────────────────────
+# Allow .gitignore/.reviewlooprc to be dirty — the installer modifies .gitignore
+# and the user may have an untracked .reviewlooprc.  Pre-existing dirty files
+# are snapshot-ed before each fix and excluded from commits (see step h).
+_dirty_non_gitignore=$(git diff --name-only | grep -v -E '^(\.gitignore|\.reviewlooprc)$' || true)
+_untracked_non_gitignore=$(git ls-files --others --exclude-standard | grep -v -E '^(\.gitignore|\.reviewlooprc)$' || true)
+_staged_non_gitignore=$(git diff --cached --name-only | grep -v -E '^(\.gitignore|\.reviewlooprc)$' || true)
+if [[ "$DRY_RUN" == false ]]; then
+  if [[ -n "$_dirty_non_gitignore" ]] || [[ -n "$_staged_non_gitignore" ]] || [[ -n "$_untracked_non_gitignore" ]]; then
+    echo "Error: working tree is not clean. Commit or stash your changes before running review-loop."
+    echo ""
+    echo "  git stash        # stash changes"
+    echo "  git commit -am …  # or commit them"
+    echo ""
+    exit 1
+  fi
+fi
+unset _dirty_non_gitignore _staged_non_gitignore _untracked_non_gitignore
+
+LOG_DIR="$SCRIPT_DIR/../logs"
 mkdir -p "$LOG_DIR"
 # Remove stale logs from previous runs so the summary only reflects this execution
-rm -f "$LOG_DIR"/review-*.json "$LOG_DIR"/fix-*.md "$LOG_DIR"/summary.md
+rm -f "$LOG_DIR"/review-*.json "$LOG_DIR"/fix-*.md "$LOG_DIR"/opinion-*.md "$LOG_DIR"/self-review-*.json "$LOG_DIR"/refix-*.md "$LOG_DIR"/refix-opinion-*.md "$LOG_DIR"/summary.md
 
 export CURRENT_BRANCH TARGET_BRANCH
 
@@ -161,9 +213,35 @@ fi
 
 echo "═══════════════════════════════════════════════════════"
 echo " Review Loop: $CURRENT_BRANCH → $TARGET_BRANCH"
-echo " Max iterations: $MAX_LOOP | Dry-run: $DRY_RUN"
+echo " Max iterations: $MAX_LOOP | Sub-loops: $MAX_SUBLOOP | Dry-run: $DRY_RUN"
 echo "═══════════════════════════════════════════════════════"
 echo ""
+
+# ── Pre-loop validation ───────────────────────────────────────────────
+if [[ "$DRY_RUN" == false ]] && [[ ! -f "$PROMPTS_DIR/claude-fix-execute.prompt.md" ]]; then
+  echo "Error: required prompt not found: $PROMPTS_DIR/claude-fix-execute.prompt.md" >&2
+  exit 1
+fi
+if [[ "$MAX_SUBLOOP" -gt 0 ]] && [[ ! -f "$PROMPTS_DIR/claude-self-review.prompt.md" ]]; then
+  echo "Warning: self-review prompt not found at $PROMPTS_DIR/claude-self-review.prompt.md — disabling self-review."
+  MAX_SUBLOOP=0
+fi
+
+# ── Cleanup trap ──────────────────────────────────────────────────────
+# Restore allowlisted stash on any exit (set -e, signals, etc.) so that
+# user-local .gitignore/.reviewlooprc edits are never stranded.
+_cleanup_stash() {
+  if [[ "${_allowed_dirty_stashed:-false}" == true ]]; then
+    if ! git stash pop --index --quiet 2>/dev/null; then
+      if ! git stash pop --quiet 2>/dev/null; then
+        echo "  Error: failed to restore stashed .gitignore/.reviewlooprc edits. Check 'git stash list'." >&2
+        FINAL_STATUS="stash_conflict"
+      fi
+    fi
+    _allowed_dirty_stashed=false
+  fi
+}
+trap _cleanup_stash EXIT
 
 # ── Loop ──────────────────────────────────────────────────────────────
 FINAL_STATUS="max_iterations_reached"
@@ -175,27 +253,10 @@ for (( i=1; i<=MAX_LOOP; i++ )); do
 
   export ITERATION="$i"
 
-  # ── a. Stash local changes ───────────────────────────────────────
-  # Stash any dirty/untracked state so the diff and review operate on a clean tree.
-  # This ensures we only review committed content, not pre-existing user edits.
-  STASH_CREATED=false
-  if ! git diff --quiet || ! git diff --cached --quiet || [[ -n "$(git ls-files --others --exclude-standard)" ]]; then
-    git stash push --include-untracked -m "review-loop: pre-fix stash (iteration $i)" -q
-    STASH_CREATED=true
-    # Ensure stash is restored even if the script exits unexpectedly (set -e)
-    trap 'echo "Warning: restoring stashed changes before exit..."; git stash pop --index -q 2>/dev/null || echo "Warning: stash pop failed; your changes are still in git stash."' EXIT
-  fi
-
-  # ── b. Check diff ──────────────────────────────────────────────────
-  DIFF=$(git diff "$TARGET_BRANCH...$CURRENT_BRANCH")
-  if [[ -z "$DIFF" ]]; then
+  # ── a. Check diff ───────────────────────────────────────────────
+  if git diff --quiet "$TARGET_BRANCH...$CURRENT_BRANCH"; then
     echo "No diff between $TARGET_BRANCH and $CURRENT_BRANCH. Nothing to review."
     FINAL_STATUS="no_diff"
-    # Restore stash before breaking
-    if [[ "$STASH_CREATED" == true ]]; then
-      trap - EXIT
-      git stash pop --index -q || echo "Warning: stash pop failed; your changes are still in git stash."
-    fi
     break
   fi
 
@@ -204,7 +265,7 @@ for (( i=1; i<=MAX_LOOP; i++ )); do
   REVIEW_FILE="$LOG_DIR/review-${i}.json"
   rm -f "$REVIEW_FILE"
 
-  REVIEW_PROMPT=$(envsubst < "$PROMPTS_DIR/codex-review.prompt.md")
+  REVIEW_PROMPT=$(envsubst '$CURRENT_BRANCH $TARGET_BRANCH $ITERATION' < "$PROMPTS_DIR/codex-review.prompt.md")
 
   if ! codex exec \
     --sandbox read-only \
@@ -212,11 +273,6 @@ for (( i=1; i<=MAX_LOOP; i++ )); do
     "$REVIEW_PROMPT" 2>&1; then
     echo "Error: Codex review failed (iteration $i). Skipping this iteration."
     FINAL_STATUS="codex_error"
-    # Restore stash before breaking
-    if [[ "$STASH_CREATED" == true ]]; then
-      trap - EXIT
-      git stash pop --index -q || echo "Warning: stash pop failed; your changes are still in git stash."
-    fi
     break
   fi
 
@@ -231,26 +287,21 @@ for (( i=1; i<=MAX_LOOP; i++ )); do
     # Extract JSON from markdown fences or mixed text
     REVIEW_JSON=$(sed -n '/^```\(json\)\{0,1\}$/,/^```$/{ /^```/d; p; }' "$REVIEW_FILE")
     # Fallback: find first { ... } block
-    if ! echo "$REVIEW_JSON" | jq empty 2>/dev/null; then
+    if [[ -z "$REVIEW_JSON" ]] || ! printf '%s' "$REVIEW_JSON" | jq empty 2>/dev/null; then
       REVIEW_JSON=$(perl -0777 -ne 'print $1 if /(\{.*\})/s' "$REVIEW_FILE" 2>/dev/null || true)
     fi
   fi
 
-  if ! echo "$REVIEW_JSON" | jq empty 2>/dev/null; then
+  if [[ -z "$REVIEW_JSON" ]] || ! printf '%s' "$REVIEW_JSON" | jq empty 2>/dev/null; then
     echo "Warning: could not parse review output as JSON. Saving raw output."
     echo "  See $REVIEW_FILE for details."
     FINAL_STATUS="parse_error"
-    # Restore stash before breaking
-    if [[ "$STASH_CREATED" == true ]]; then
-      trap - EXIT
-      git stash pop --index -q || echo "Warning: stash pop failed; your changes are still in git stash."
-    fi
     break
   fi
 
   # ── e. Check findings ────────────────────────────────────────────
-  FINDINGS_COUNT=$(echo "$REVIEW_JSON" | jq '.findings | length')
-  OVERALL=$(echo "$REVIEW_JSON" | jq -r '.overall_correctness')
+  FINDINGS_COUNT=$(printf '%s' "$REVIEW_JSON" | jq '.findings | length')
+  OVERALL=$(printf '%s' "$REVIEW_JSON" | jq -r '.overall_correctness')
 
   echo "  Findings: $FINDINGS_COUNT | Overall: $OVERALL"
 
@@ -270,11 +321,6 @@ EOF
       fi
     fi
     FINAL_STATUS="all_clear"
-    # Restore stash before breaking
-    if [[ "$STASH_CREATED" == true ]]; then
-      trap - EXIT
-      git stash pop --index -q || echo "Warning: stash pop failed; your changes are still in git stash."
-    fi
     break
   fi
 
@@ -282,67 +328,250 @@ EOF
   if [[ "$DRY_RUN" == true ]]; then
     echo "  Dry-run mode — skipping fixes."
     FINAL_STATUS="dry_run"
-    # Restore stash before breaking
-    if [[ "$STASH_CREATED" == true ]]; then
-      trap - EXIT
-      git stash pop --index -q || echo "Warning: stash pop failed; your changes are still in git stash."
-    fi
     break
   fi
 
-  # ── g. Claude fix ────────────────────────────────────────────────
-  echo "[$(date +%H:%M:%S)] Running Claude fix..."
+  # ── Stash allowed dirty files (.gitignore/.reviewlooprc) ─────────
+  # These files may be dirty from the installer or user edits.  Stash them
+  # before snapshotting so they are excluded from Claude's commit even if
+  # Claude happens to modify the same file.
+  _allowed_dirty_stashed=false
+  _allowed_dirty_files=()
+  for _adf in .gitignore .reviewlooprc; do
+    if git diff --name-only | grep -qx "$(printf '%s' "$_adf" | sed 's/[.[\*^$()+?{|]/\\&/g')" \
+    || git diff --cached --name-only | grep -qx "$(printf '%s' "$_adf" | sed 's/[.[\*^$()+?{|]/\\&/g')" \
+    || git ls-files --others --exclude-standard | grep -qx "$(printf '%s' "$_adf" | sed 's/[.[\*^$()+?{|]/\\&/g')"; then
+      _allowed_dirty_files+=("$_adf")
+    fi
+  done
+  if [[ ${#_allowed_dirty_files[@]} -gt 0 ]]; then
+    git stash push --quiet --include-untracked -- "${_allowed_dirty_files[@]}" 2>/dev/null && _allowed_dirty_stashed=true
+  fi
+
+  # ── Snapshot pre-fix working tree state ──────────────────────────
+  # Record every dirty/untracked file with its content hash so that step h
+  # can distinguish pre-existing changes from Claude's fixes.
+  PRE_FIX_STATE=$(mktemp)
+  {
+    git diff -z --name-only
+    git diff -z --cached --name-only
+    git ls-files -z --others --exclude-standard
+  } | perl -0 -e 'my %seen; while (defined(my $l = <>)) { chomp $l; print "$l\0" unless $seen{$l}++ }' | while IFS= read -r -d '' _f; do
+    [[ -n "$_f" ]] || continue
+    if [[ -f "$_f" ]]; then
+      _hash=$(git hash-object "$_f" 2>/dev/null || echo UNHASHABLE)
+      if [[ -x "$_f" ]]; then _fmode="100755"; else _fmode="100644"; fi
+      printf '%s\t%s\t%s\n' "$_hash" "$_fmode" "$_f"
+    else
+      printf 'DELETED\t000000\t%s\n' "$_f"
+    fi
+  done > "$PRE_FIX_STATE"
+
+  # ── g. Claude fix (two-step: opinion → execute) ─────────────────
+  echo "[$(date +%H:%M:%S)] Running Claude fix (step 1: opinion)..."
   FIX_FILE="$LOG_DIR/fix-${i}.md"
+  OPINION_FILE="$LOG_DIR/opinion-${i}.md"
+  FIX_SESSION_ID=$(_gen_uuid)
 
   export REVIEW_JSON
-  FIX_PROMPT=$(envsubst < "$PROMPTS_DIR/claude-fix.prompt.md")
+  FIX_PROMPT=$(envsubst '$CURRENT_BRANCH $TARGET_BRANCH $REVIEW_JSON' < "$PROMPTS_DIR/claude-fix.prompt.md")
 
+  # Step 1: Ask Claude's opinion (read-only, no edit tools)
   if ! printf '%s' "$FIX_PROMPT" | claude -p - \
+    --session-id "$FIX_SESSION_ID" \
+    --allowedTools "Read,Glob,Grep" \
+    > "$OPINION_FILE" 2>&1; then
+    echo "  Error: Claude opinion failed (iteration $i). See $OPINION_FILE for details."
+    FINAL_STATUS="claude_error"
+    rm -f "$PRE_FIX_STATE"
+    _cleanup_stash
+    break
+  fi
+  echo "  Opinion saved to $OPINION_FILE"
+
+  # Step 2: Tell Claude to fix based on its own analysis
+  echo "[$(date +%H:%M:%S)] Running Claude fix (step 2: execute)..."
+  FIX_EXEC_PROMPT=$(cat "$PROMPTS_DIR/claude-fix-execute.prompt.md")
+
+  if ! printf '%s' "$FIX_EXEC_PROMPT" | claude -p - \
+    --resume "$FIX_SESSION_ID" \
     --allowedTools "Edit,Read,Glob,Grep,Bash" \
     > "$FIX_FILE" 2>&1; then
-    echo "  Error: Claude fix failed (iteration $i). See $FIX_FILE for details."
-    # Restore stash before exiting
-    if [[ "$STASH_CREATED" == true ]]; then
-      trap - EXIT
-      git stash pop --index -q || echo "Warning: stash pop failed; your changes are still in git stash."
-    fi
+    echo "  Error: Claude fix-execute failed (iteration $i). See $FIX_FILE for details."
     FINAL_STATUS="claude_error"
+    rm -f "$PRE_FIX_STATE"
+    _cleanup_stash
     break
   fi
 
   echo "  Fix log saved to $FIX_FILE"
 
-  # ── h. Commit & push fixes ──────────────────────────────────────
-  # After Claude, only its changes are in the working tree (stash holds user edits).
-  if [[ "$AUTO_COMMIT" != true ]]; then
-    echo "  AUTO_COMMIT is disabled — skipping commit and push."
-    # Restore stash before breaking; uncommitted fixes would be stashed away
-    # on the next iteration, causing the loop to re-review the same diff.
-    if [[ "$STASH_CREATED" == true ]]; then
-      trap - EXIT
-      if ! git stash pop --index -q; then
-        echo "  Error: stash pop had conflicts; resolve manually before rerunning."
-        FINAL_STATUS="stash_conflict"
+  # ── g2. Claude self-review sub-loop ─────────────────────────────
+  SELF_REVIEW_SUMMARY=""
+  ORIGINAL_REVIEW_JSON="$REVIEW_JSON"
+  if [[ "$MAX_SUBLOOP" -gt 0 ]]; then
+    for (( j=1; j<=MAX_SUBLOOP; j++ )); do
+      # Check if Claude's fix produced any changes vs pre-fix snapshot
+      _fix_dirty=$(mktemp)
+      { git diff -z --name-only; git diff -z --cached --name-only; git ls-files -z --others --exclude-standard; } | perl -0 -e 'my %seen; while (defined(my $l = <>)) { chomp $l; print "$l\0" unless $seen{$l}++ }' > "$_fix_dirty"
+      _fix_files_tmp=$(mktemp)
+      while IFS= read -r -d '' _f; do
+        [[ -n "$_f" ]] || continue
+        [[ "$_f" == .review-loop/logs/* ]] && continue
+        if [[ -f "$_f" ]]; then
+          _cur_hash=$(git hash-object "$_f" 2>/dev/null || echo UNHASHABLE)
+          if [[ -x "$_f" ]]; then _cur_mode="100755"; else _cur_mode="100644"; fi
+        else
+          _cur_hash="DELETED"
+          _cur_mode="000000"
+        fi
+        _pre_hash=$(awk -F'\t' -v f="$_f" '$3 == f { print $1; exit }' "$PRE_FIX_STATE")
+        _pre_mode=$(awk -F'\t' -v f="$_f" '$3 == f { print $2; exit }' "$PRE_FIX_STATE")
+        if [[ -z "$_pre_hash" ]] || [[ "$_cur_hash" != "$_pre_hash" ]] || [[ "$_cur_mode" != "$_pre_mode" ]]; then
+          printf '%s\0' "$_f"
+        fi
+      done < "$_fix_dirty" > "$_fix_files_tmp"
+      rm -f "$_fix_dirty"
+      if [[ ! -s "$_fix_files_tmp" ]]; then
+        echo "  No working tree changes from fix — skipping self-review."
+        rm -f "$_fix_files_tmp"
         break
       fi
-    fi
-    FINAL_STATUS="auto_commit_disabled"
-    break
-  else
-    # Collect changed/new files as NUL-delimited list for whitespace safety.
-    # Use a temp file because Bash strips NUL bytes in command substitution.
+
+      echo "[$(date +%H:%M:%S)] Running Claude self-review (sub-iteration $j/$MAX_SUBLOOP)..."
+      SELF_REVIEW_FILE="$LOG_DIR/self-review-${i}-${j}.json"
+
+      # Dump diff for only files changed by the fix (exclude pre-existing dirty files)
+      # Stage untracked files as intent-to-add so git diff HEAD can see them
+      xargs -0 git add --intent-to-add -- < "$_fix_files_tmp" 2>/dev/null || true
+      export DIFF_FILE="$LOG_DIR/diff-${i}-${j}.diff"
+      xargs -0 git diff HEAD -- < "$_fix_files_tmp" > "$DIFF_FILE"
+      # Immediately undo intent-to-add so we never clobber pre-existing staged state
+      xargs -0 git reset --quiet -- < "$_fix_files_tmp" 2>/dev/null || true
+      rm -f "$_fix_files_tmp"
+
+      # Ensure self-review prompt always references the original Codex findings
+      export REVIEW_JSON="$ORIGINAL_REVIEW_JSON"
+      SELF_REVIEW_PROMPT=$(envsubst '$CURRENT_BRANCH $TARGET_BRANCH $ITERATION $REVIEW_JSON $DIFF_FILE' < "$PROMPTS_DIR/claude-self-review.prompt.md")
+
+      # Claude self-review — tool access for git diff, file reading, etc.
+      if ! printf '%s' "$SELF_REVIEW_PROMPT" | claude -p - \
+        --allowedTools "Read,Glob,Grep" \
+        > "$SELF_REVIEW_FILE" 2>&1; then
+        echo "  Warning: self-review failed (sub-iteration $j). Continuing with current fixes."
+        SELF_REVIEW_SUMMARY="${SELF_REVIEW_SUMMARY}Sub-iteration $j: self-review failed\n"
+        break
+      fi
+
+      # JSON parsing (same logic as codex review)
+      SELF_REVIEW_JSON=""
+      if [[ ! -s "$SELF_REVIEW_FILE" ]]; then
+        echo "  Warning: self-review produced empty output (sub-iteration $j). Continuing with current fixes."
+        SELF_REVIEW_SUMMARY="${SELF_REVIEW_SUMMARY}Sub-iteration $j: empty output\n"
+        break
+      fi
+      if jq empty "$SELF_REVIEW_FILE" 2>/dev/null; then
+        SELF_REVIEW_JSON=$(cat "$SELF_REVIEW_FILE")
+      else
+        SELF_REVIEW_JSON=$(sed -n '/^```[a-zA-Z]*$/,/^```$/{ /^```/d; p; }' "$SELF_REVIEW_FILE")
+        if [[ -z "$SELF_REVIEW_JSON" ]] || ! printf '%s' "$SELF_REVIEW_JSON" | jq empty 2>/dev/null; then
+          SELF_REVIEW_JSON=$(perl -0777 -ne 'print $1 if /(\{.*\})/s' "$SELF_REVIEW_FILE" 2>/dev/null || true)
+        fi
+      fi
+
+      if [[ -z "$SELF_REVIEW_JSON" ]] || ! printf '%s' "$SELF_REVIEW_JSON" | jq empty 2>/dev/null; then
+        echo "  Warning: could not parse self-review output. Continuing."
+        SELF_REVIEW_SUMMARY="${SELF_REVIEW_SUMMARY}Sub-iteration $j: parse error\n"
+        break
+      fi
+
+      SR_FINDINGS=$(printf '%s' "$SELF_REVIEW_JSON" | jq '.findings | length')
+      SR_OVERALL=$(printf '%s' "$SELF_REVIEW_JSON" | jq -r '.overall_correctness')
+      echo "  Self-review: $SR_FINDINGS findings | $SR_OVERALL"
+
+      if [[ "$SR_FINDINGS" -eq 0 ]] && [[ "$SR_OVERALL" == "patch is correct" ]]; then
+        echo "  Self-review passed — fixes are clean."
+        SELF_REVIEW_SUMMARY="${SELF_REVIEW_SUMMARY}Sub-iteration $j: 0 findings — passed\n"
+        break
+      fi
+
+      # Claude re-fix (two-step: opinion → execute)
+      echo "[$(date +%H:%M:%S)] Running Claude re-fix (sub-iteration $j/$MAX_SUBLOOP, step 1: opinion)..."
+      REFIX_FILE="$LOG_DIR/refix-${i}-${j}.md"
+      REFIX_OPINION_FILE="$LOG_DIR/refix-opinion-${i}-${j}.md"
+      REFIX_SESSION_ID=$(_gen_uuid)
+
+      export REVIEW_JSON="$SELF_REVIEW_JSON"
+      REFIX_PROMPT=$(envsubst '$CURRENT_BRANCH $TARGET_BRANCH $REVIEW_JSON' < "$PROMPTS_DIR/claude-fix.prompt.md")
+
+      # Step 1: opinion
+      if ! printf '%s' "$REFIX_PROMPT" | claude -p - \
+        --session-id "$REFIX_SESSION_ID" \
+        --allowedTools "Read,Glob,Grep" \
+        > "$REFIX_OPINION_FILE" 2>&1; then
+        echo "  Warning: re-fix opinion failed (sub-iteration $j). Continuing with current state."
+        SELF_REVIEW_SUMMARY="${SELF_REVIEW_SUMMARY}Sub-iteration $j: $SR_FINDINGS findings — re-fix failed\n"
+        break
+      fi
+
+      # Step 2: execute
+      echo "[$(date +%H:%M:%S)] Running Claude re-fix (sub-iteration $j/$MAX_SUBLOOP, step 2: execute)..."
+      REFIX_EXEC_PROMPT=$(cat "$PROMPTS_DIR/claude-fix-execute.prompt.md")
+
+      if ! printf '%s' "$REFIX_EXEC_PROMPT" | claude -p - \
+        --resume "$REFIX_SESSION_ID" \
+        --allowedTools "Edit,Read,Glob,Grep,Bash" \
+        > "$REFIX_FILE" 2>&1; then
+        echo "  Warning: re-fix execute failed (sub-iteration $j). Continuing with current state."
+        SELF_REVIEW_SUMMARY="${SELF_REVIEW_SUMMARY}Sub-iteration $j: $SR_FINDINGS findings — re-fix failed\n"
+        break
+      fi
+      SELF_REVIEW_SUMMARY="${SELF_REVIEW_SUMMARY}Sub-iteration $j: $SR_FINDINGS findings — re-fixed\n"
+      echo "  Re-fix log saved to $REFIX_FILE"
+    done
+  fi
+  export REVIEW_JSON="$ORIGINAL_REVIEW_JSON"
+
+  # ── h. Commit & push fixes ──────────────────────────────────────
+  if [[ "$AUTO_COMMIT" == true ]]; then
+    # Select files changed by Claude (compare against pre-fix snapshot).
+    # Only files that are newly dirty or have different content are committed,
+    # so pre-existing changes (e.g. installer's .gitignore) are never swept in.
     FIX_FILES_NUL_FILE=$(mktemp)
-    { git diff --name-only -z; git diff --cached --name-only -z; git ls-files --others --exclude-standard -z; } | tr '\0' '\n' | sort -u | { grep -v '^\.ai-review-logs/' || true; } | tr '\n' '\0' > "$FIX_FILES_NUL_FILE"
+    _post_dirty=$(mktemp)
+    { git diff -z --name-only; git diff -z --cached --name-only; git ls-files -z --others --exclude-standard; } | perl -0 -e 'my %seen; while (defined(my $l = <>)) { chomp $l; print "$l\0" unless $seen{$l}++ }' > "$_post_dirty"
+    while IFS= read -r -d '' _f; do
+      [[ -n "$_f" ]] || continue
+      [[ "$_f" == .review-loop/logs/* ]] && continue
+      if [[ -f "$_f" ]]; then
+        _cur_hash=$(git hash-object "$_f" 2>/dev/null || echo UNHASHABLE)
+        if [[ -x "$_f" ]]; then _cur_mode="100755"; else _cur_mode="100644"; fi
+      else
+        _cur_hash="DELETED"
+        _cur_mode="000000"
+      fi
+      _pre_hash=$(awk -F'\t' -v f="$_f" '$3 == f { print $1; exit }' "$PRE_FIX_STATE")
+      _pre_mode=$(awk -F'\t' -v f="$_f" '$3 == f { print $2; exit }' "$PRE_FIX_STATE")
+      if [[ -z "$_pre_hash" ]] || [[ "$_cur_hash" != "$_pre_hash" ]] || [[ "$_cur_mode" != "$_pre_mode" ]]; then
+        printf '%s\0' "$_f"
+      fi
+    done < "$_post_dirty" > "$FIX_FILES_NUL_FILE"
+    rm -f "$_post_dirty"
     if [[ ! -s "$FIX_FILES_NUL_FILE" ]]; then
       echo "  No file changes after fix — nothing to commit."
       rm -f "$FIX_FILES_NUL_FILE"
     else
       echo "[$(date +%H:%M:%S)] Committing fixes..."
-      xargs -0 git add -- < "$FIX_FILES_NUL_FILE"
-      git commit --pathspec-from-file="$FIX_FILES_NUL_FILE" --pathspec-file-nul \
-        -m "fix(ai-review): apply iteration $i fixes
+      git reset --quiet --pathspec-from-file="$FIX_FILES_NUL_FILE" --pathspec-file-nul HEAD 2>/dev/null || true
+      git add --pathspec-from-file="$FIX_FILES_NUL_FILE" --pathspec-file-nul
+      COMMIT_MSG="fix(ai-review): apply iteration $i fixes
 
 Auto-generated by review-loop.sh (iteration $i/$MAX_LOOP)"
+      if [[ -n "$SELF_REVIEW_SUMMARY" ]]; then
+        COMMIT_MSG="${COMMIT_MSG}
+Self-review: $(printf '%b' "$SELF_REVIEW_SUMMARY" | tr '\n' '; ' | sed 's/; $//')"
+      fi
+      git commit -m "$COMMIT_MSG" --pathspec-from-file="$FIX_FILES_NUL_FILE" --pathspec-file-nul
       rm -f "$FIX_FILES_NUL_FILE"
       echo "  Committed."
 
@@ -355,16 +584,17 @@ Auto-generated by review-loop.sh (iteration $i/$MAX_LOOP)"
         echo "  No upstream set — skipping push. Run: git push -u origin $CURRENT_BRANCH"
       fi
     fi
+  else
+    echo "  AUTO_COMMIT is disabled — skipping commit and push."
   fi
+  rm -f "$PRE_FIX_STATE"
+  _cleanup_stash
+  [[ "$FINAL_STATUS" == "stash_conflict" ]] && break
 
-  # Restore pre-existing user edits from stash
-  if [[ "$STASH_CREATED" == true ]]; then
-    trap - EXIT
-    if ! git stash pop --index -q; then
-      echo "  Error: stash pop had conflicts; resolve manually before rerunning."
-      FINAL_STATUS="stash_conflict"
-      break
-    fi
+  # Stop after first iteration when auto-commit is off (fixes applied but not committed)
+  if [[ "$AUTO_COMMIT" != true ]]; then
+    FINAL_STATUS="auto_commit_disabled"
+    break
   fi
 
   # ── i. Post iteration summary as PR comment ─────────────────────
@@ -372,7 +602,7 @@ Auto-generated by review-loop.sh (iteration $i/$MAX_LOOP)"
     echo "[$(date +%H:%M:%S)] Posting PR comment..."
 
     # Build findings table
-    FINDINGS_TABLE=$(echo "$REVIEW_JSON" | jq -r '
+    FINDINGS_TABLE=$(printf '%s' "$REVIEW_JSON" | jq -r '
       .findings[] |
       "| \(.title) | \(.confidence_score) | `\(.code_location.absolute_file_path):\(.code_location.line_range.start)` |"
     ')
@@ -387,33 +617,45 @@ Auto-generated by review-loop.sh (iteration $i/$MAX_LOOP)"
       fi
     fi
 
-    COMMENT_BODY=$(cat <<EOF
-### AI Review — Iteration $i / $MAX_LOOP
+    # Build comment body in a temp file to avoid heredoc delimiter
+    # collisions and ARG_MAX limits with --body.
+    COMMENT_BODY_FILE=$(mktemp)
 
-**Overall**: $OVERALL ($FINDINGS_COUNT findings)
+    printf '### AI Review — Iteration %d / %d\n\n' "$i" "$MAX_LOOP" > "$COMMENT_BODY_FILE"
+    printf '**Overall**: %s (%s findings)\n\n' "$OVERALL" "$FINDINGS_COUNT" >> "$COMMENT_BODY_FILE"
 
-<details>
-<summary>Review Findings</summary>
+    # Findings table
+    printf '<details>\n<summary>Review Findings</summary>\n\n' >> "$COMMENT_BODY_FILE"
+    printf '| Finding | Confidence | Location |\n' >> "$COMMENT_BODY_FILE"
+    printf '|---------|-----------|----------|\n' >> "$COMMENT_BODY_FILE"
+    printf '%s\n' "$FINDINGS_TABLE" >> "$COMMENT_BODY_FILE"
+    printf '\n</details>\n\n' >> "$COMMENT_BODY_FILE"
 
-| Finding | Confidence | Location |
-|---------|-----------|----------|
-$FINDINGS_TABLE
+    # Fix summary
+    printf '<details>\n<summary>Fix Actions</summary>\n\n' >> "$COMMENT_BODY_FILE"
+    printf '%s\n' "$FIX_SUMMARY" >> "$COMMENT_BODY_FILE"
+    printf '\n</details>\n' >> "$COMMENT_BODY_FILE"
 
-</details>
+    # Opinion section (conditional)
+    if [[ -f "$OPINION_FILE" ]] && [[ -s "$OPINION_FILE" ]]; then
+      printf '\n<details>\n<summary>Claude Opinion</summary>\n\n' >> "$COMMENT_BODY_FILE"
+      head -c 2000 "$OPINION_FILE" >> "$COMMENT_BODY_FILE"
+      printf '\n\n</details>\n' >> "$COMMENT_BODY_FILE"
+    fi
 
-<details>
-<summary>Fix Actions</summary>
+    # Self-review section (conditional)
+    if [[ -n "$SELF_REVIEW_SUMMARY" ]]; then
+      printf '\n<details>\n<summary>Self-Review (%d max sub-iterations)</summary>\n\n' "$MAX_SUBLOOP" >> "$COMMENT_BODY_FILE"
+      printf '%b\n' "$SELF_REVIEW_SUMMARY" >> "$COMMENT_BODY_FILE"
+      printf '</details>\n' >> "$COMMENT_BODY_FILE"
+    fi
 
-$FIX_SUMMARY
-
-</details>
-EOF
-)
-    if gh pr comment "$PR_NUMBER" --body "$COMMENT_BODY"; then
+    if gh pr comment "$PR_NUMBER" --body-file "$COMMENT_BODY_FILE"; then
       echo "  PR comment posted."
     else
       echo "  Warning: failed to post PR comment (non-fatal)."
     fi
+    rm -f "$COMMENT_BODY_FILE"
   fi
 
   echo ""
@@ -438,6 +680,14 @@ SUMMARY_FILE="$LOG_DIR/summary.md"
     count=$(jq '.findings | length' "$f" 2>/dev/null || echo "?")
     verdict=$(jq -r '.overall_correctness' "$f" 2>/dev/null || echo "?")
     echo "- **Iteration $iter**: $count findings, verdict: $verdict"
+    # Include self-review sub-iteration info
+    for sf in "$LOG_DIR"/self-review-"${iter}"-*.json; do
+      [[ -e "$sf" ]] || continue
+      sub_iter=$(basename "$sf" | sed "s/self-review-${iter}-//;s/.json//")
+      sr_count=$(jq '.findings | length' "$sf" 2>/dev/null || echo "?")
+      sr_verdict=$(jq -r '.overall_correctness' "$sf" 2>/dev/null || echo "?")
+      echo "  - Sub-iteration $sub_iter: $sr_count findings, verdict: $sr_verdict"
+    done
   done
 } > "$SUMMARY_FILE"
 
