@@ -313,6 +313,23 @@ EOF
     break
   fi
 
+  # ── Stash allowed dirty files (.gitignore/.reviewlooprc) ─────────
+  # These files may be dirty from the installer or user edits.  Stash them
+  # before snapshotting so they are excluded from Claude's commit even if
+  # Claude happens to modify the same file.
+  _allowed_dirty_stashed=false
+  _allowed_dirty_files=()
+  for _adf in .gitignore .reviewlooprc; do
+    if git diff --name-only | grep -qx "$(printf '%s' "$_adf" | sed 's/[.[\*^$()+?{|]/\\&/g')" \
+    || git diff --cached --name-only | grep -qx "$(printf '%s' "$_adf" | sed 's/[.[\*^$()+?{|]/\\&/g')" \
+    || git ls-files --others --exclude-standard | grep -qx "$(printf '%s' "$_adf" | sed 's/[.[\*^$()+?{|]/\\&/g')"; then
+      _allowed_dirty_files+=("$_adf")
+    fi
+  done
+  if [[ ${#_allowed_dirty_files[@]} -gt 0 ]]; then
+    git stash push --quiet --include-untracked -- "${_allowed_dirty_files[@]}" 2>/dev/null && _allowed_dirty_stashed=true
+  fi
+
   # ── Snapshot pre-fix working tree state ──────────────────────────
   # Record every dirty/untracked file with its content hash so that step h
   # can distinguish pre-existing changes from Claude's fixes.
@@ -349,6 +366,7 @@ EOF
     echo "  Error: Claude opinion failed (iteration $i). See $OPINION_FILE for details."
     FINAL_STATUS="claude_error"
     rm -f "$PRE_FIX_STATE"
+    [[ "$_allowed_dirty_stashed" == true ]] && git stash pop --quiet 2>/dev/null || true
     break
   fi
   echo "  Opinion saved to $OPINION_FILE"
@@ -364,6 +382,7 @@ EOF
     echo "  Error: Claude fix-execute failed (iteration $i). See $FIX_FILE for details."
     FINAL_STATUS="claude_error"
     rm -f "$PRE_FIX_STATE"
+    [[ "$_allowed_dirty_stashed" == true ]] && git stash pop --quiet 2>/dev/null || true
     break
   fi
 
@@ -551,6 +570,7 @@ Self-review: $(printf '%b' "$SELF_REVIEW_SUMMARY" | tr '\n' '; ' | sed 's/; $//'
     echo "  AUTO_COMMIT is disabled — skipping commit and push."
   fi
   rm -f "$PRE_FIX_STATE"
+  [[ "$_allowed_dirty_stashed" == true ]] && git stash pop --quiet 2>/dev/null || true
 
   # Stop after first iteration when auto-commit is off (fixes applied but not committed)
   if [[ "$AUTO_COMMIT" != true ]]; then
