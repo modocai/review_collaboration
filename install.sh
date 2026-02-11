@@ -14,37 +14,40 @@ if [[ ! -d "$TARGET_DIR" ]]; then
 fi
 TARGET_DIR=$(cd "$TARGET_DIR" && pwd)
 
-echo "Installing review-loop v${VERSION} into: $TARGET_DIR"
+echo "Installing review-loop v${VERSION} into: $TARGET_DIR/.review-loop/"
 
-# Copy bin/ and active prompts
-cp -r "$SCRIPT_DIR/bin" "$TARGET_DIR/"
-mkdir -p "$TARGET_DIR/prompts/active"
-cp "$SCRIPT_DIR"/prompts/active/* "$TARGET_DIR/prompts/active/"
-chmod +x "$TARGET_DIR/bin/review-loop.sh"
+INSTALL_DIR="$TARGET_DIR/.review-loop"
+mkdir -p "$INSTALL_DIR"
+
+# Copy bin/
+cp -r "$SCRIPT_DIR/bin" "$INSTALL_DIR/"
+chmod +x "$INSTALL_DIR/bin/review-loop.sh"
+
+# Copy active prompts
+mkdir -p "$INSTALL_DIR/prompts/active"
+cp "$SCRIPT_DIR"/prompts/active/* "$INSTALL_DIR/prompts/active/"
 
 # Copy .reviewlooprc.example
 if [[ -f "$SCRIPT_DIR/.reviewlooprc.example" ]]; then
-  cp "$SCRIPT_DIR/.reviewlooprc.example" "$TARGET_DIR/"
+  cp "$SCRIPT_DIR/.reviewlooprc.example" "$INSTALL_DIR/"
   echo "Copied .reviewlooprc.example"
 fi
 
-# Add .ai-review-logs/ to .gitignore if not already present
+# Add .review-loop/ to .gitignore
 GITIGNORE="$TARGET_DIR/.gitignore"
-if [[ -f "$GITIGNORE" ]]; then
-  if ! grep -qF '.ai-review-logs/' "$GITIGNORE"; then
-    echo "" >> "$GITIGNORE"
-    echo "# AI review logs (added by review-loop installer)" >> "$GITIGNORE"
-    echo ".ai-review-logs/" >> "$GITIGNORE"
-    echo "Added .ai-review-logs/ to existing .gitignore"
-  else
-    echo ".ai-review-logs/ already in .gitignore"
-  fi
+MARKER="# review-loop (added by installer)"
+if [[ -f "$GITIGNORE" ]] && grep -qxF ".review-loop/" "$GITIGNORE"; then
+  echo "review-loop entry already in .gitignore"
 else
-  cat > "$GITIGNORE" <<'EOF'
-# AI review logs (added by review-loop installer)
-.ai-review-logs/
-EOF
-  echo "Created .gitignore with .ai-review-logs/"
+  # Ensure file ends with a newline before appending
+  if [[ -f "$GITIGNORE" ]] && [[ -s "$GITIGNORE" ]] && [[ "$(tail -c1 "$GITIGNORE")" != "" ]]; then
+    echo "" >> "$GITIGNORE"
+  fi
+  {
+    echo "$MARKER"
+    echo ".review-loop/"
+  } >> "$GITIGNORE"
+  echo "Added .review-loop/ to .gitignore"
 fi
 
-echo "Done. Run: bin/review-loop.sh -n 3"
+echo "Done. Run: .review-loop/bin/review-loop.sh -n 3"

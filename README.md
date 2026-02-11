@@ -39,13 +39,14 @@ npm install -g @anthropic-ai/claude-code  # Claude Code CLI
 - [jq](https://jqlang.github.io/jq/) — JSON processor
 - [gh](https://cli.github.com/) — GitHub CLI (optional, for PR comments)
 - [envsubst](https://www.gnu.org/software/gettext/) — part of GNU gettext (macOS: `brew install gettext`)
+- [perl](https://www.perl.org/) — used for JSON extraction and deduplication (pre-installed on macOS and most Linux)
 - git
 
 ## Quick Start
 
 ```bash
-# In your project directory:
-./bin/review-loop.sh -n 3
+# In your project directory (after install):
+.review-loop/bin/review-loop.sh -n 3
 ```
 
 ## Usage
@@ -56,6 +57,8 @@ review-loop.sh [OPTIONS]
 Options:
   -t, --target <branch>    Target branch to diff against (default: develop)
   -n, --max-loop <N>       Maximum review-fix iterations (required)
+  --max-subloop <N>        Maximum self-review sub-iterations per fix (default: 2)
+  --no-self-review         Disable self-review (equivalent to --max-subloop 0)
   --dry-run                Run review only, do not fix
   --no-auto-commit         Fix but do not commit/push (single iteration)
   -V, --version            Show version
@@ -65,6 +68,7 @@ Examples:
   review-loop.sh -t main -n 3          # diff against main, max 3 loops
   review-loop.sh -n 5                  # diff against develop, max 5 loops
   review-loop.sh -n 1 --dry-run        # single review, no fixes
+  review-loop.sh -n 3 --no-self-review # disable self-review sub-loop
   review-loop.sh --version             # print version
 ```
 
@@ -76,46 +80,57 @@ Create a `.reviewlooprc` file in your project root to set defaults. CLI argument
 # .reviewlooprc
 TARGET_BRANCH="main"
 MAX_LOOP=5
+MAX_SUBLOOP=2
 AUTO_COMMIT=true
 PROMPTS_DIR="./custom-prompts"
 ```
 
-See `.reviewlooprc.example` for all available options.
+See `.review-loop/.reviewlooprc.example` for all available options.
 
 ## How It Works
 
 ```
 1. Check prerequisites (git, codex, claude, jq, envsubst, target branch)
-2. Create .ai-review-logs/ directory
+2. Create .review-loop/logs/ directory
 3. Loop (iteration 1..N):
    a. Generate diff: git diff $TARGET...$CURRENT
    b. Empty diff → exit
    c. Codex reviews the diff → JSON with findings
    d. No findings + "patch is correct" → exit
    e. Claude fixes all issues (P0-P3)
-   f. Auto-commit fixes to branch
-   g. Push to remote (updates PR)
-   h. Post review findings + fix summary as PR comment
-   i. Next iteration reviews the updated committed state
-4. Write summary to .ai-review-logs/summary.md
+   f. Sub-loop (1..MAX_SUBLOOP):
+      - Claude self-reviews the uncommitted fixes (git diff)
+      - If clean → break
+      - Claude re-fixes based on self-review findings
+   g. Auto-commit all fixes + re-fixes to branch
+   h. Push to remote (updates PR)
+   i. Post review/fix/self-review summary as PR comment
+   j. Next iteration reviews the updated committed state
+4. Write summary to .review-loop/logs/summary.md
 ```
 
 ## Output Files
 
-All logs are saved to `.ai-review-logs/` (git-ignored by default):
+All logs are saved to `.review-loop/logs/` (git-ignored by default):
 
 | File | Description |
 |------|-------------|
 | `review-N.json` | Codex review output for iteration N |
+| `opinion-N.md` | Claude's opinion on review findings (iteration N) |
 | `fix-N.md` | Claude fix log for iteration N |
+| `self-review-N-M.json` | Claude self-review output (iteration N, sub-iteration M) |
+| `refix-opinion-N-M.md` | Claude's opinion on self-review findings (iteration N, sub M) |
+| `refix-N-M.md` | Claude re-fix log (iteration N, sub-iteration M) |
 | `summary.md` | Final summary with status and per-iteration results |
 
 ## Customizing Prompts
 
-Edit the templates in `prompts/active/`:
+Edit the templates in `.review-loop/prompts/active/` (or `prompts/active/` in the source repo):
 
 - **`codex-review.prompt.md`** — Review prompt sent to Codex. Uses `envsubst` variables: `${CURRENT_BRANCH}`, `${TARGET_BRANCH}`, `${ITERATION}`.
-- **`claude-fix.prompt.md`** — Fix prompt sent to Claude. Uses: `${REVIEW_JSON}`, `${CURRENT_BRANCH}`, `${TARGET_BRANCH}`.
+- **`claude-fix.prompt.md`** — Opinion prompt: Claude evaluates review findings. Uses: `${REVIEW_JSON}`, `${CURRENT_BRANCH}`, `${TARGET_BRANCH}`.
+- **`claude-fix-execute.prompt.md`** — Execute prompt: tells Claude to fix based on its opinion.
+- **`claude-self-review.prompt.md`** — Self-review prompt for Claude to check its own fixes. Uses: `${REVIEW_JSON}`, `${CURRENT_BRANCH}`, `${TARGET_BRANCH}`, `${ITERATION}`.
 
 Reference prompts (read-only originals) are in `prompts/reference/`.
 
@@ -146,7 +161,7 @@ The loop terminates when any of these occur:
 ./uninstall.sh /path/to/your-project
 ```
 
-This removes `bin/review-loop.sh`, `prompts/active/`, `.reviewlooprc.example`, and the `.ai-review-logs/` entry from `.gitignore`.
+This removes the `.review-loop/` directory and its `.gitignore` entry.
 
 ## Contributing
 
