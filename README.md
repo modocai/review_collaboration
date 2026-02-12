@@ -188,6 +188,7 @@ This removes the `.review-loop/` directory and its `.gitignore` entry.
 2. Create a feature branch (`git checkout -b feat/my-feature`)
 3. Commit your changes
 4. Open a Pull Request against `develop`
+5. Run `review-loop.sh -n 3` on your PR branch — **strongly recommended**. Let Mr. Overkill review and fix your code before a human ever sees it. We eat our own dog food.
 
 ## License
 
