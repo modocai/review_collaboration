@@ -496,10 +496,12 @@ for (( i=1; i<=MAX_LOOP; i++ )); do
 
   # Normalize absolute paths to repo-relative
   REVIEW_JSON=$(printf '%s' "$REVIEW_JSON" | jq --arg root "$(git rev-parse --show-toplevel)/" '
-    .findings |= map(
-      .code_location.file_path = (.code_location.file_path // .code_location.absolute_file_path | ltrimstr($root))
-      | del(.code_location.absolute_file_path)
-    )
+    if .findings then
+      .findings |= map(
+        .code_location.file_path = (.code_location.file_path // .code_location.absolute_file_path | ltrimstr($root))
+        | del(.code_location.absolute_file_path)
+      )
+    else . end
   ')
 
   # ── e. Check findings ────────────────────────────────────────────
