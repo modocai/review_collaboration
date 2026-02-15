@@ -3,3 +3,5 @@
 
 # Legacy log directory from previous versions
 .ai-review-logs/
+# review-loop (added by installer)
+.review-loop/
