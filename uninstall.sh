@@ -19,6 +19,12 @@ echo "Uninstalling review-loop from: $TARGET_DIR"
 
 # Remove installer-owned files inside .review-loop/ (current layout)
 if [[ -d "$TARGET_DIR/.review-loop" ]]; then
+  # bin/lib/
+  if [[ -f "$TARGET_DIR/.review-loop/bin/lib/common.sh" ]]; then
+    rm "$TARGET_DIR/.review-loop/bin/lib/common.sh"
+    echo "Removed .review-loop/bin/lib/common.sh"
+  fi
+  rmdir "$TARGET_DIR/.review-loop/bin/lib" 2>/dev/null && echo "Removed empty .review-loop/bin/lib/" || true
   # bin/
   if [[ -f "$TARGET_DIR/.review-loop/bin/review-loop.sh" ]]; then
     rm "$TARGET_DIR/.review-loop/bin/review-loop.sh"
