@@ -139,7 +139,6 @@ if [[ "$HAS_GH" == false ]]; then
 fi
 
 
-
 # Generate summary.md from iteration logs.
 # Reads globals: LOG_DIR, CURRENT_BRANCH, TARGET_BRANCH, MAX_LOOP, FINAL_STATUS
 _generate_summary() {

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Shared utilities for mr-overkill scripts.
 # Usage: source "$SCRIPT_DIR/lib/common.sh"
+# Requires: caller must set -euo pipefail before sourcing.
 
 [[ -n "${_COMMON_SH_LOADED:-}" ]] && return 0
 _COMMON_SH_LOADED=1
