@@ -22,15 +22,20 @@ mkdir -p "$INSTALL_DIR"
 # Copy bin/
 cp -r "$SCRIPT_DIR/bin" "$INSTALL_DIR/"
 chmod +x "$INSTALL_DIR/bin/review-loop.sh"
+chmod +x "$INSTALL_DIR/bin/refactor-suggest.sh"
 
 # Copy active prompts
 mkdir -p "$INSTALL_DIR/prompts/active"
 cp "$SCRIPT_DIR"/prompts/active/* "$INSTALL_DIR/prompts/active/"
 
-# Copy .reviewlooprc.example
+# Copy rc examples
 if [[ -f "$SCRIPT_DIR/.reviewlooprc.example" ]]; then
   cp "$SCRIPT_DIR/.reviewlooprc.example" "$INSTALL_DIR/"
   echo "Copied .reviewlooprc.example"
+fi
+if [[ -f "$SCRIPT_DIR/.refactorsuggestrc.example" ]]; then
+  cp "$SCRIPT_DIR/.refactorsuggestrc.example" "$INSTALL_DIR/"
+  echo "Copied .refactorsuggestrc.example"
 fi
 
 # Add .review-loop/ to .gitignore

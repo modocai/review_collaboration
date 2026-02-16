@@ -119,16 +119,20 @@ _changed_files_since_snapshot() {
 # ── Claude Two-Step Execution ────────────────────────────────────────
 # Two-step Claude fix: opinion (read-only) → execute (edit tools).
 # $1 = review JSON, $2 = opinion output file, $3 = fix output file, $4 = label
+# $5 = opinion prompt filename (optional, default: claude-fix.prompt.md)
+# $6 = execute prompt filename (optional, default: claude-fix-execute.prompt.md)
 # Uses globals: CURRENT_BRANCH, TARGET_BRANCH, PROMPTS_DIR (read-only)
 # Does not modify global state.
 # Returns 1 on failure; caller handles FINAL_STATUS/cleanup.
 _claude_two_step_fix() {
   local _rjson="$1" _opinion_file="$2" _fix_file="$3" _label="$4"
+  local _opinion_prompt="${5:-claude-fix.prompt.md}"
+  local _execute_prompt="${6:-claude-fix-execute.prompt.md}"
   local _session_id _prompt _exec_prompt
 
   _session_id=$(_gen_uuid)
 
-  _prompt=$(REVIEW_JSON="$_rjson" envsubst '$CURRENT_BRANCH $TARGET_BRANCH $REVIEW_JSON' < "$PROMPTS_DIR/claude-fix.prompt.md")
+  _prompt=$(REVIEW_JSON="$_rjson" envsubst '$CURRENT_BRANCH $TARGET_BRANCH $REVIEW_JSON' < "$PROMPTS_DIR/$_opinion_prompt")
 
   echo "[$(date +%H:%M:%S)] Running Claude $_label (step 1: opinion)..."
   if ! printf '%s' "$_prompt" | claude -p - \
@@ -141,7 +145,7 @@ _claude_two_step_fix() {
   echo "  Opinion saved to $_opinion_file"
 
   echo "[$(date +%H:%M:%S)] Running Claude $_label (step 2: execute)..."
-  _exec_prompt=$(cat "$PROMPTS_DIR/claude-fix-execute.prompt.md")
+  _exec_prompt=$(cat "$PROMPTS_DIR/$_execute_prompt")
 
   if ! printf '%s' "$_exec_prompt" | claude -p - \
     --resume "$_session_id" \
@@ -151,6 +155,42 @@ _claude_two_step_fix() {
     return 1
   fi
   echo "  $_label log saved to $_fix_file"
+}
+
+# ── Commit & Push ───────────────────────────────────────────────────
+# Commit files changed since a snapshot and push if upstream exists.
+# $1 = snapshot file, $2 = commit message, $3 = branch name (for push hint)
+# Uses globals: none required.
+# Returns 0 on commit, 1 if nothing to commit.
+_commit_and_push() {
+  local _snap="$1" _msg="$2" _branch="${3:-}"
+  local _fix_files_nul
+
+  if ! _fix_files_nul=$(_changed_files_since_snapshot "$_snap"); then
+    echo "  No file changes after fix — nothing to commit."
+    return 1
+  fi
+
+  echo "[$(date +%H:%M:%S)] Committing fixes..."
+  git reset --quiet --pathspec-from-file="$_fix_files_nul" --pathspec-file-nul HEAD 2>/dev/null || true
+  git add --pathspec-from-file="$_fix_files_nul" --pathspec-file-nul
+  git commit -m "$_msg" --pathspec-from-file="$_fix_files_nul" --pathspec-file-nul
+  rm -f "$_fix_files_nul"
+  echo "  Committed."
+
+  # Push to update PR (if remote tracking exists)
+  if git rev-parse --abbrev-ref --symbolic-full-name "@{u}" &>/dev/null; then
+    echo "[$(date +%H:%M:%S)] Pushing to remote..."
+    git push
+    echo "  Pushed."
+  else
+    if [[ -n "$_branch" ]]; then
+      echo "  No upstream set — skipping push. Run: git push -u origin $_branch"
+    else
+      echo "  No upstream set — skipping push."
+    fi
+  fi
+  return 0
 }
 
 # ── PR Commenting ────────────────────────────────────────────────────

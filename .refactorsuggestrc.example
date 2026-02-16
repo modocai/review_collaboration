@@ -1,0 +1,27 @@
+# .refactorsuggestrc — project-level configuration for refactor-suggest.sh
+# Copy this file to your project root as ".refactorsuggestrc" and customize.
+# CLI arguments always take precedence over these values.
+
+# Refactoring scope: micro | module | layer | full (default: micro)
+# SCOPE="micro"
+
+# Target branch to base the refactoring branch from (default: develop)
+# TARGET_BRANCH="develop"
+
+# Maximum analysis-fix iterations (default: unset, required via CLI)
+# MAX_LOOP=3
+
+# Maximum self-review sub-iterations per fix (default: 4, set 0 to disable)
+# MAX_SUBLOOP=4
+
+# Run analysis only, do not apply fixes (default: false)
+# DRY_RUN=false
+
+# Skip interactive confirmation for layer/full scope (default: false)
+# AUTO_APPROVE=false
+
+# Create a draft PR after completing all iterations (default: false)
+# CREATE_PR=false
+
+# Path to active prompt templates (default: <script_dir>/../prompts/active)
+# PROMPTS_DIR="./custom-prompts"
