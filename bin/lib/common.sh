@@ -159,6 +159,9 @@ _claude_two_step_fix() {
 
 # ── Commit & Push ───────────────────────────────────────────────────
 # Commit files changed since a snapshot and push if upstream exists.
+# Only files that are newly dirty or have different content vs the snapshot
+# are committed, so pre-existing changes (e.g. installer's .gitignore)
+# are never swept in.
 # $1 = snapshot file, $2 = commit message, $3 = branch name (for push hint)
 # Uses globals: none required.
 # Returns 0 on commit, 1 if nothing to commit.

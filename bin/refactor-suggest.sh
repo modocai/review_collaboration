@@ -489,7 +489,7 @@ Self-review: $(printf '%b' "$SELF_REVIEW_SUMMARY" | tr '\n' '; ' | sed 's/; $//'
 done
 
 # ── Create draft PR ───────────────────────────────────────────────────
-if [[ "$CREATE_PR" == true ]] && [[ "$DRY_RUN" == false ]] && [[ "$FINAL_STATUS" != "codex_error" ]] && [[ "$FINAL_STATUS" != "claude_error" ]] && [[ "$FINAL_STATUS" != "user_aborted" ]]; then
+if [[ "$CREATE_PR" == true ]] && [[ "$DRY_RUN" == false ]] && [[ "$FINAL_STATUS" != "codex_error" ]] && [[ "$FINAL_STATUS" != "claude_error" ]] && [[ "$FINAL_STATUS" != "user_aborted" ]] && [[ "$FINAL_STATUS" != "all_clear" ]]; then
   # Ensure branch is pushed
   if ! git rev-parse --abbrev-ref --symbolic-full-name "@{u}" &>/dev/null; then
     echo "[$(date +%H:%M:%S)] Pushing branch to remote..."
