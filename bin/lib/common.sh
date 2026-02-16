@@ -196,6 +196,47 @@ _commit_and_push() {
   return 0
 }
 
+# ── Summary Generation ──────────────────────────────────────────────
+# Generate summary.md from iteration logs.
+# $1 = title (e.g. "Review Loop Summary", "Refactor Suggest Summary")
+# Additional lines can be passed as $2..$N and are inserted after the title.
+# Uses globals: LOG_DIR, CURRENT_BRANCH, TARGET_BRANCH, MAX_LOOP, FINAL_STATUS
+_generate_summary() {
+  local _title="$1"; shift
+  local SUMMARY_FILE="$LOG_DIR/summary.md"
+  {
+    echo "# $_title"
+    echo ""
+    local _extra
+    for _extra in "$@"; do
+      echo "$_extra"
+    done
+    echo "- **Branch**: $CURRENT_BRANCH → $TARGET_BRANCH"
+    echo "- **Max iterations**: $MAX_LOOP"
+    echo "- **Final status**: $FINAL_STATUS"
+    echo "- **Timestamp**: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    echo ""
+    echo "## Iteration Logs"
+    echo ""
+    local f iter count verdict sf sub_iter sr_count sr_verdict
+    for f in "$LOG_DIR"/review-*.json; do
+      [[ -e "$f" ]] || continue
+      iter=$(basename "$f" | sed 's/review-//;s/.json//')
+      count=$(jq '.findings | length' "$f" 2>/dev/null || echo "?")
+      verdict=$(jq -r '.overall_correctness' "$f" 2>/dev/null || echo "?")
+      echo "- **Iteration $iter**: $count findings, verdict: $verdict"
+      for sf in "$LOG_DIR"/self-review-"${iter}"-*.json; do
+        [[ -e "$sf" ]] || continue
+        sub_iter=$(basename "$sf" | sed "s/self-review-${iter}-//;s/.json//")
+        sr_count=$(jq '.findings | length' "$sf" 2>/dev/null || echo "?")
+        sr_verdict=$(jq -r '.overall_correctness' "$sf" 2>/dev/null || echo "?")
+        echo "  - Sub-iteration $sub_iter: $sr_count findings, verdict: $sr_verdict"
+      done
+    done
+  } > "$SUMMARY_FILE"
+  printf '%s' "$SUMMARY_FILE"
+}
+
 # ── PR Commenting ────────────────────────────────────────────────────
 # Post iteration summary as PR comment.
 # Reads globals: PR_NUMBER, REVIEW_JSON, OVERALL, FINDINGS_COUNT,

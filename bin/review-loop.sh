@@ -139,38 +139,6 @@ if [[ "$HAS_GH" == false ]]; then
 fi
 
 
-# Generate summary.md from iteration logs.
-# Reads globals: LOG_DIR, CURRENT_BRANCH, TARGET_BRANCH, MAX_LOOP, FINAL_STATUS
-_generate_summary() {
-  local SUMMARY_FILE="$LOG_DIR/summary.md"
-  {
-    echo "# Review Loop Summary"
-    echo ""
-    echo "- **Branch**: $CURRENT_BRANCH → $TARGET_BRANCH"
-    echo "- **Max iterations**: $MAX_LOOP"
-    echo "- **Final status**: $FINAL_STATUS"
-    echo "- **Timestamp**: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    echo ""
-    echo "## Iteration Logs"
-    echo ""
-    local f iter count verdict sf sub_iter sr_count sr_verdict
-    for f in "$LOG_DIR"/review-*.json; do
-      [[ -e "$f" ]] || continue
-      iter=$(basename "$f" | sed 's/review-//;s/.json//')
-      count=$(jq '.findings | length' "$f" 2>/dev/null || echo "?")
-      verdict=$(jq -r '.overall_correctness' "$f" 2>/dev/null || echo "?")
-      echo "- **Iteration $iter**: $count findings, verdict: $verdict"
-      for sf in "$LOG_DIR"/self-review-"${iter}"-*.json; do
-        [[ -e "$sf" ]] || continue
-        sub_iter=$(basename "$sf" | sed "s/self-review-${iter}-//;s/.json//")
-        sr_count=$(jq '.findings | length' "$sf" 2>/dev/null || echo "?")
-        sr_verdict=$(jq -r '.overall_correctness' "$sf" 2>/dev/null || echo "?")
-        echo "  - Sub-iteration $sub_iter: $sr_count findings, verdict: $sr_verdict"
-      done
-    done
-  } > "$SUMMARY_FILE"
-  printf '%s' "$SUMMARY_FILE"
-}
 
 if ! git rev-parse --is-inside-work-tree &>/dev/null; then
   echo "Error: not inside a git repository."
@@ -240,7 +208,8 @@ fi
 # ── Cleanup trap ──────────────────────────────────────────────────────
 # Restore allowlisted stash on any exit (set -e, signals, etc.) so that
 # user-local .gitignore/.reviewlooprc edits are never stranded.
-_cleanup_stash() {
+_cleanup() {
+  rm -f "${PRE_FIX_STATE:-}"
   if [[ "${_allowed_dirty_stashed:-false}" == true ]]; then
     if ! git stash pop --index --quiet 2>/dev/null; then
       if ! git stash pop --quiet 2>/dev/null; then
@@ -251,7 +220,7 @@ _cleanup_stash() {
     _allowed_dirty_stashed=false
   fi
 }
-trap _cleanup_stash EXIT
+trap _cleanup EXIT
 
 # ── Loop ──────────────────────────────────────────────────────────────
 FINAL_STATUS="max_iterations_reached"
@@ -368,8 +337,7 @@ EOF
 
   if ! _claude_two_step_fix "$REVIEW_JSON" "$OPINION_FILE" "$FIX_FILE" "fix"; then
     FINAL_STATUS="claude_error"
-    rm -f "$PRE_FIX_STATE"
-    _cleanup_stash
+    _cleanup
     break
   fi
 
@@ -465,7 +433,8 @@ Self-review: $(printf '%b' "$SELF_REVIEW_SUMMARY" | tr '\n' '; ' | sed 's/; $//'
     echo "  AUTO_COMMIT is disabled — skipping commit and push."
   fi
   rm -f "$PRE_FIX_STATE"
-  _cleanup_stash
+  PRE_FIX_STATE=""
+  _cleanup
   [[ "$FINAL_STATUS" == "stash_conflict" ]] && break
 
   # Stop after first iteration when auto-commit is off (fixes applied but not committed)
@@ -481,7 +450,7 @@ Self-review: $(printf '%b' "$SELF_REVIEW_SUMMARY" | tr '\n' '; ' | sed 's/; $//'
 done
 
 # ── Summary ───────────────────────────────────────────────────────────
-SUMMARY_FILE=$(_generate_summary)
+SUMMARY_FILE=$(_generate_summary "Review Loop Summary")
 
 echo ""
 echo "═══════════════════════════════════════════════════════"
