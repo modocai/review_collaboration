@@ -174,7 +174,7 @@ SCOPE="micro"
 TARGET_BRANCH="develop"
 MAX_LOOP=3
 MAX_SUBLOOP=4
-DRY_RUN=true
+DRY_RUN=true           # safe default — remove to apply fixes (script default: false)
 AUTO_APPROVE=false
 CREATE_PR=false
 PROMPTS_DIR="./custom-prompts"
@@ -246,10 +246,12 @@ Edit the templates in `.review-loop/prompts/active/` (or `prompts/active/` in th
 
 Each scope has a dedicated Codex prompt with scope-specific instructions, anti-pattern guardrails, and good/bad finding examples:
 
-- **`codex-refactor-micro.prompt.md`** — Function/file-level analysis. Uses: `${TARGET_BRANCH}`, `${ITERATION}`, `${SOURCE_FILES_PATH}`.
+- **`codex-refactor-micro.prompt.md`** — Function/file-level analysis.
 - **`codex-refactor-module.prompt.md`** — Module duplication and boundary analysis.
 - **`codex-refactor-layer.prompt.md`** — Cross-cutting concern analysis.
 - **`codex-refactor-full.prompt.md`** — Architecture-level analysis.
+
+All four Codex prompts use `envsubst` variables: `${TARGET_BRANCH}`, `${ITERATION}`, `${SOURCE_FILES_PATH}`.
 - **`claude-refactor-fix.prompt.md`** — Opinion prompt: Claude evaluates refactoring findings with scope-aware judgment. Uses: `${REVIEW_JSON}`, `${CURRENT_BRANCH}`, `${TARGET_BRANCH}`.
 - **`claude-refactor-fix-execute.prompt.md`** — Execute prompt with safety guards (syntax check, scope overflow detection, regression testing).
 
