@@ -23,7 +23,7 @@ remove_gitignore_block() {
     skip && $0 ~ entry { skip=0; next }
     { skip=0; print }
   ' "$GITIGNORE" > "$tmp"
-  sed -e :a -e '/^\n*$/{$d;N;ba' -e '}' "$tmp" > "$GITIGNORE"
+  awk '{ lines[NR]=$0; if(NF) last=NR } END { for(i=1;i<=last;i++) print lines[i] }' "$tmp" > "$GITIGNORE"
   rm -f "$tmp"
   echo "Removed $label from .gitignore"
   if [[ ! -s "$GITIGNORE" ]]; then
