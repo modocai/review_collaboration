@@ -95,7 +95,7 @@ _changed_files_since_snapshot() {
   _out=$(mktemp)
   _git_all_dirty_nul | while IFS= read -r -d '' _f; do
     [[ -n "$_f" ]] || continue
-    [[ "$_f" == .review-loop/logs/* || "$_f" == logs/* ]] && continue
+    [[ "$_f" == .review-loop/logs/* ]] && continue
     if [[ -f "$_f" ]]; then
       _cur_hash=$(git hash-object "$_f" 2>/dev/null || echo UNHASHABLE)
       if [[ -x "$_f" ]]; then _cur_mode="100755"; else _cur_mode="100644"; fi
