@@ -194,7 +194,8 @@ REFACTOR_BRANCH="refactor/${SCOPE}-${TIMESTAMP}"
 if [[ "$DRY_RUN" == false ]]; then
   # Stash allowlisted files that may conflict with branch switch
   _needs_stash=false
-  if ! git diff --quiet -- .gitignore .refactorsuggestrc 2>/dev/null; then
+  if ! git diff --quiet -- .gitignore .refactorsuggestrc 2>/dev/null \
+     || ! git diff --cached --quiet -- .gitignore .refactorsuggestrc 2>/dev/null; then
     _needs_stash=true
     git stash push --quiet -- .gitignore .refactorsuggestrc
   fi
@@ -203,7 +204,11 @@ if [[ "$DRY_RUN" == false ]]; then
   git checkout -b "$REFACTOR_BRANCH" "$TARGET_BRANCH"
 
   if [[ "$_needs_stash" == true ]]; then
-    git stash pop --quiet
+    if ! git stash pop --quiet; then
+      echo "Error: stash pop conflict while restoring .gitignore/.refactorsuggestrc." >&2
+      echo "  Resolve manually: git stash show, git stash drop" >&2
+      exit 1
+    fi
   fi
   unset _needs_stash
   CURRENT_BRANCH="$REFACTOR_BRANCH"
@@ -475,7 +480,8 @@ Self-review: $(printf '%b' "$SELF_REVIEW_SUMMARY" | tr '\n' '; ' | sed 's/; $//'
 done
 
 # ── Create draft PR ───────────────────────────────────────────────────
-if [[ "$CREATE_PR" == true ]] && [[ "$DRY_RUN" == false ]] && [[ "$FINAL_STATUS" == "max_iterations_reached" ]]; then
+if [[ "$CREATE_PR" == true ]] && [[ "$DRY_RUN" == false ]] \
+   && [[ "$FINAL_STATUS" == "max_iterations_reached" || "$FINAL_STATUS" == "all_clear" ]]; then
   # Ensure branch is pushed
   if ! git rev-parse --abbrev-ref --symbolic-full-name "@{u}" &>/dev/null; then
     echo "[$(date +%H:%M:%S)] Pushing branch to remote..."
