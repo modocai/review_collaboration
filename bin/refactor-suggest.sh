@@ -341,7 +341,14 @@ for (( i=1; i<=MAX_LOOP; i++ )); do
     break
   fi
 
-  # ── d. Display plan and confirm (layer/full) ─────────────────────
+  # ── d. Dry-run check ────────────────────────────────────────────
+  if [[ "$DRY_RUN" == true ]]; then
+    echo "  Dry-run mode — skipping fixes."
+    FINAL_STATUS="dry_run"
+    break
+  fi
+
+  # ── e. Display plan and confirm (layer/full) ─────────────────────
   if [[ "$SCOPE" == "layer" || "$SCOPE" == "full" ]] && [[ "$AUTO_APPROVE" == false ]]; then
     echo ""
     echo "  Refactoring plan:"
@@ -353,13 +360,6 @@ for (( i=1; i<=MAX_LOOP; i++ )); do
       FINAL_STATUS="user_aborted"
       break
     fi
-  fi
-
-  # ── e. Dry-run check ────────────────────────────────────────────
-  if [[ "$DRY_RUN" == true ]]; then
-    echo "  Dry-run mode — skipping fixes."
-    FINAL_STATUS="dry_run"
-    break
   fi
 
   # ── Stash allowed dirty files ───────────────────────────────────
