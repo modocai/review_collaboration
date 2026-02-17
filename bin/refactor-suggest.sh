@@ -171,9 +171,9 @@ fi
 
 # Clean working tree check (only when applying fixes)
 if [[ "$DRY_RUN" == false ]]; then
-  _dirty=$(git diff --name-only | grep -v -E '^(\.gitignore|\.refactorsuggestrc)$' || true)
-  _untracked=$(git ls-files --others --exclude-standard | grep -v -E '^(\.gitignore|\.refactorsuggestrc)$' || true)
-  _staged=$(git diff --cached --name-only | grep -v -E '^(\.gitignore|\.refactorsuggestrc)$' || true)
+  _dirty=$(git diff --name-only | grep -v -E '^(\.gitignore|\.refactorsuggestrc|\.reviewlooprc)$' || true)
+  _untracked=$(git ls-files --others --exclude-standard | grep -v -E '^(\.gitignore|\.refactorsuggestrc|\.reviewlooprc)$' || true)
+  _staged=$(git diff --cached --name-only | grep -v -E '^(\.gitignore|\.refactorsuggestrc|\.reviewlooprc)$' || true)
   if [[ -n "$_dirty" ]] || [[ -n "$_staged" ]] || [[ -n "$_untracked" ]]; then
     echo "Error: working tree is not clean. Commit or stash your changes before running refactor-suggest."
     echo ""
@@ -218,7 +218,7 @@ if [[ "$DRY_RUN" == false ]]; then
   # Stash allowlisted files that may conflict with branch switch
   _needs_stash=false
   _stash_files=()
-  for _sf in .gitignore .refactorsuggestrc; do
+  for _sf in .gitignore .refactorsuggestrc .reviewlooprc; do
     if git diff --name-only | grep -qx "$(printf '%s' "$_sf" | sed 's/[.[\*^$()+?{|]/\\&/g')" \
     || git diff --cached --name-only | grep -qx "$(printf '%s' "$_sf" | sed 's/[.[\*^$()+?{|]/\\&/g')" \
     || git ls-files --others --exclude-standard | grep -qx "$(printf '%s' "$_sf" | sed 's/[.[\*^$()+?{|]/\\&/g')"; then
@@ -240,7 +240,7 @@ if [[ "$DRY_RUN" == false ]]; then
   if [[ "$_needs_stash" == true ]]; then
     if ! git stash pop --index --quiet 2>/dev/null; then
       if ! git stash pop --quiet; then
-        echo "Error: stash pop conflict while restoring .gitignore/.refactorsuggestrc." >&2
+        echo "Error: stash pop conflict while restoring .gitignore/.refactorsuggestrc/.reviewlooprc." >&2
         echo "  Resolve manually: git stash show, git stash drop" >&2
         exit 1
       fi
@@ -381,7 +381,7 @@ for (( i=1; i<=MAX_LOOP; i++ )); do
   # ── Stash allowed dirty files ───────────────────────────────────
   _allowed_dirty_stashed=false
   _allowed_dirty_files=()
-  for _adf in .gitignore .refactorsuggestrc; do
+  for _adf in .gitignore .refactorsuggestrc .reviewlooprc; do
     if git diff --name-only | grep -qx "$(printf '%s' "$_adf" | sed 's/[.[\*^$()+?{|]/\\&/g')" \
     || git diff --cached --name-only | grep -qx "$(printf '%s' "$_adf" | sed 's/[.[\*^$()+?{|]/\\&/g')" \
     || git ls-files --others --exclude-standard | grep -qx "$(printf '%s' "$_adf" | sed 's/[.[\*^$()+?{|]/\\&/g')"; then
