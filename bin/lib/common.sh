@@ -187,12 +187,14 @@ _commit_and_push() {
     git push
     echo "  Pushed."
   else
-    if [[ -n "$_branch" ]]; then
+    local _remote
+    _remote=$(git remote | head -1)
+    if [[ -n "$_branch" ]] && [[ -n "$_remote" ]]; then
       echo "[$(date +%H:%M:%S)] Setting upstream and pushing..."
-      git push -u "$(git remote | head -1)" "$_branch"
+      git push -u "$_remote" "$_branch"
       echo "  Pushed (upstream set)."
     else
-      echo "  No upstream set — skipping push."
+      echo "  No upstream/remote set — skipping push."
     fi
   fi
   return 0
