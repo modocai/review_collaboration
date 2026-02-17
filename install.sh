@@ -18,6 +18,7 @@ echo "Installing review-loop v${VERSION} into: $TARGET_DIR/.review-loop/"
 
 INSTALL_DIR="$TARGET_DIR/.review-loop"
 mkdir -p "$INSTALL_DIR"
+mkdir -p "$INSTALL_DIR/logs/refactor"
 
 # Copy bin/
 cp -r "$SCRIPT_DIR/bin" "$INSTALL_DIR/"
