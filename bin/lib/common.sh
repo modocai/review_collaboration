@@ -188,7 +188,7 @@ _commit_and_push() {
     echo "  Pushed."
   else
     local _remote
-    _remote=$(git remote | head -1)
+    _remote=$(git remote | grep -m1 '^origin$' || git remote | head -1)
     if [[ -n "$_branch" ]] && [[ -n "$_remote" ]]; then
       echo "[$(date +%H:%M:%S)] Setting upstream and pushing..."
       git push -u "$_remote" "$_branch"

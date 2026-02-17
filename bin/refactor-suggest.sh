@@ -187,6 +187,29 @@ fi
 
 CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 
+# ── Prompt validation ─────────────────────────────────────────────────
+CODEX_PROMPT_FILE="codex-refactor-${SCOPE}.prompt.md"
+if [[ ! -f "$PROMPTS_DIR/$CODEX_PROMPT_FILE" ]]; then
+  echo "Error: required prompt not found: $PROMPTS_DIR/$CODEX_PROMPT_FILE" >&2
+  exit 1
+fi
+
+if [[ "$DRY_RUN" == false ]]; then
+  if [[ ! -f "$PROMPTS_DIR/claude-refactor-fix.prompt.md" ]]; then
+    echo "Error: required prompt not found: $PROMPTS_DIR/claude-refactor-fix.prompt.md" >&2
+    exit 1
+  fi
+  if [[ ! -f "$PROMPTS_DIR/claude-refactor-fix-execute.prompt.md" ]]; then
+    echo "Error: required prompt not found: $PROMPTS_DIR/claude-refactor-fix-execute.prompt.md" >&2
+    exit 1
+  fi
+fi
+
+if [[ "$MAX_SUBLOOP" -gt 0 ]] && [[ ! -f "$PROMPTS_DIR/claude-self-review.prompt.md" ]]; then
+  echo "Warning: self-review prompt not found — disabling self-review."
+  MAX_SUBLOOP=0
+fi
+
 # ── Branch creation ───────────────────────────────────────────────────
 TIMESTAMP=$(date +%Y%m%d-%H%M%S)
 REFACTOR_BRANCH="refactor/${SCOPE}-${TIMESTAMP}"
@@ -239,29 +262,6 @@ SOURCE_COUNT=$(wc -l < "$SOURCE_FILES_PATH" | tr -d ' ')
 echo "Collected $SOURCE_COUNT source files into $SOURCE_FILES_PATH"
 
 export SOURCE_FILES_PATH
-
-# ── Prompt validation ─────────────────────────────────────────────────
-CODEX_PROMPT_FILE="codex-refactor-${SCOPE}.prompt.md"
-if [[ ! -f "$PROMPTS_DIR/$CODEX_PROMPT_FILE" ]]; then
-  echo "Error: required prompt not found: $PROMPTS_DIR/$CODEX_PROMPT_FILE" >&2
-  exit 1
-fi
-
-if [[ "$DRY_RUN" == false ]]; then
-  if [[ ! -f "$PROMPTS_DIR/claude-refactor-fix.prompt.md" ]]; then
-    echo "Error: required prompt not found: $PROMPTS_DIR/claude-refactor-fix.prompt.md" >&2
-    exit 1
-  fi
-  if [[ ! -f "$PROMPTS_DIR/claude-refactor-fix-execute.prompt.md" ]]; then
-    echo "Error: required prompt not found: $PROMPTS_DIR/claude-refactor-fix-execute.prompt.md" >&2
-    exit 1
-  fi
-fi
-
-if [[ "$MAX_SUBLOOP" -gt 0 ]] && [[ ! -f "$PROMPTS_DIR/claude-self-review.prompt.md" ]]; then
-  echo "Warning: self-review prompt not found — disabling self-review."
-  MAX_SUBLOOP=0
-fi
 
 echo ""
 echo "═══════════════════════════════════════════════════════"
@@ -492,7 +492,7 @@ if [[ "$CREATE_PR" == true ]] && [[ "$DRY_RUN" == false ]] \
   # Ensure branch is pushed
   _push_ok=true
   if ! git rev-parse --abbrev-ref --symbolic-full-name "@{u}" &>/dev/null; then
-    _remote=$(git remote | head -1)
+    _remote=$(git remote | grep -m1 '^origin$' || git remote | head -1)
     if [[ -n "$_remote" ]]; then
       echo "[$(date +%H:%M:%S)] Pushing branch to remote..."
       git push -u "$_remote" "$CURRENT_BRANCH"
