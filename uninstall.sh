@@ -10,11 +10,6 @@ if [[ ! -d "$TARGET_DIR" ]]; then
 fi
 TARGET_DIR=$(cd "$TARGET_DIR" && pwd)
 
-if ! command -v perl &>/dev/null; then
-  echo "Error: 'perl' is required for uninstall but not found."
-  exit 1
-fi
-
 echo "Uninstalling review-loop from: $TARGET_DIR"
 
 # Remove .review-loop/ directory
@@ -37,7 +32,7 @@ if [[ -f "$GITIGNORE" ]] && grep -qxF "$MARKER" "$GITIGNORE"; then
     { skip=0; print }
   ' "$GITIGNORE" > "$TMP_GITIGNORE"
   # Remove trailing blank lines
-  perl -0777 -pe 's/\n+\z/\n/' "$TMP_GITIGNORE" > "$GITIGNORE"
+  sed -e :a -e '/^\n*$/{$d;N;ba' -e '}' "$TMP_GITIGNORE" > "$GITIGNORE"
   rm -f "$TMP_GITIGNORE"
   echo "Removed review-loop entries from .gitignore"
   # Remove .gitignore if it became empty
@@ -58,7 +53,7 @@ if [[ -f "$GITIGNORE" ]] && grep -qxF "$LEGACY_MARKER" "$GITIGNORE"; then
     { skip=0; print }
   ' "$GITIGNORE" > "$TMP_GITIGNORE"
   # Remove trailing blank lines
-  perl -0777 -pe 's/\n+\z/\n/' "$TMP_GITIGNORE" > "$GITIGNORE"
+  sed -e :a -e '/^\n*$/{$d;N;ba' -e '}' "$TMP_GITIGNORE" > "$GITIGNORE"
   rm -f "$TMP_GITIGNORE"
   echo "Removed .ai-review-logs/ from .gitignore"
   # Remove .gitignore if it became empty
