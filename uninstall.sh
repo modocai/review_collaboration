@@ -17,80 +17,12 @@ fi
 
 echo "Uninstalling review-loop from: $TARGET_DIR"
 
-# Remove installer-owned files inside .review-loop/ (current layout)
+# Remove .review-loop/ directory
 if [[ -d "$TARGET_DIR/.review-loop" ]]; then
-  # bin/lib/
-  if [[ -f "$TARGET_DIR/.review-loop/bin/lib/common.sh" ]]; then
-    rm "$TARGET_DIR/.review-loop/bin/lib/common.sh"
-    echo "Removed .review-loop/bin/lib/common.sh"
-  fi
-  rmdir "$TARGET_DIR/.review-loop/bin/lib" 2>/dev/null && echo "Removed empty .review-loop/bin/lib/" || true
-  # bin/
-  if [[ -f "$TARGET_DIR/.review-loop/bin/review-loop.sh" ]]; then
-    rm "$TARGET_DIR/.review-loop/bin/review-loop.sh"
-    echo "Removed .review-loop/bin/review-loop.sh"
-  fi
-  if [[ -f "$TARGET_DIR/.review-loop/bin/refactor-suggest.sh" ]]; then
-    rm "$TARGET_DIR/.review-loop/bin/refactor-suggest.sh"
-    echo "Removed .review-loop/bin/refactor-suggest.sh"
-  fi
-  rmdir "$TARGET_DIR/.review-loop/bin" 2>/dev/null && echo "Removed empty .review-loop/bin/" || true
-  # prompts/active/
-  for _pfile in codex-review.prompt.md claude-fix.prompt.md claude-fix-execute.prompt.md claude-self-review.prompt.md \
-    codex-refactor-micro.prompt.md codex-refactor-module.prompt.md codex-refactor-layer.prompt.md codex-refactor-full.prompt.md \
-    claude-refactor-fix.prompt.md claude-refactor-fix-execute.prompt.md; do
-    if [[ -f "$TARGET_DIR/.review-loop/prompts/active/$_pfile" ]]; then
-      rm "$TARGET_DIR/.review-loop/prompts/active/$_pfile"
-      echo "Removed .review-loop/prompts/active/$_pfile"
-    fi
-  done
-  rmdir "$TARGET_DIR/.review-loop/prompts/active" 2>/dev/null && echo "Removed empty .review-loop/prompts/active/" || true
-  rmdir "$TARGET_DIR/.review-loop/prompts" 2>/dev/null && echo "Removed empty .review-loop/prompts/" || true
-  # logs/ (runtime artifacts)
-  if [[ -d "$TARGET_DIR/.review-loop/logs" ]]; then
-    rm -rf "$TARGET_DIR/.review-loop/logs"
-    echo "Removed .review-loop/logs/"
-  fi
-  # rc examples
-  if [[ -f "$TARGET_DIR/.review-loop/.reviewlooprc.example" ]]; then
-    rm "$TARGET_DIR/.review-loop/.reviewlooprc.example"
-    echo "Removed .review-loop/.reviewlooprc.example"
-  fi
-  if [[ -f "$TARGET_DIR/.review-loop/.refactorsuggestrc.example" ]]; then
-    rm "$TARGET_DIR/.review-loop/.refactorsuggestrc.example"
-    echo "Removed .review-loop/.refactorsuggestrc.example"
-  fi
-  # Remove .review-loop/ only if empty (preserves user-added files)
-  rmdir "$TARGET_DIR/.review-loop" 2>/dev/null && echo "Removed empty .review-loop/" || true
-fi
-
-# Remove legacy install layout (pre-.review-loop/ consolidation)
-_legacy_install=false
-if [[ -f "$TARGET_DIR/bin/review-loop.sh" ]] || [[ -d "$TARGET_DIR/prompts/active" ]]; then
-  _legacy_install=true
-fi
-for _bfile in review-loop.sh refactor-suggest.sh; do
-  if [[ -f "$TARGET_DIR/bin/$_bfile" ]]; then
-    rm "$TARGET_DIR/bin/$_bfile"
-    echo "Removed bin/$_bfile"
-  fi
-done
-rmdir "$TARGET_DIR/bin" 2>/dev/null && echo "Removed empty bin/" || true
-for _pfile in codex-review.prompt.md claude-fix.prompt.md claude-fix-execute.prompt.md claude-self-review.prompt.md \
-  codex-refactor-micro.prompt.md codex-refactor-module.prompt.md codex-refactor-layer.prompt.md codex-refactor-full.prompt.md \
-  claude-refactor-fix.prompt.md claude-refactor-fix-execute.prompt.md; do
-  if [[ -f "$TARGET_DIR/prompts/active/$_pfile" ]]; then
-    rm "$TARGET_DIR/prompts/active/$_pfile"
-    echo "Removed prompts/active/$_pfile"
-  fi
-done
-rmdir "$TARGET_DIR/prompts/active" 2>/dev/null && echo "Removed empty prompts/active/" || true
-rmdir "$TARGET_DIR/prompts" 2>/dev/null && echo "Removed empty prompts/" || true
-# Only remove root .reviewlooprc.example for legacy installs — the current
-# installer places it inside .review-loop/ which is already removed above.
-if [[ "$_legacy_install" == true ]] && [[ -f "$TARGET_DIR/.reviewlooprc.example" ]]; then
-  rm "$TARGET_DIR/.reviewlooprc.example"
-  echo "Removed legacy .reviewlooprc.example"
+  rm -rf "$TARGET_DIR/.review-loop"
+  echo "Removed .review-loop/"
+else
+  echo "Nothing to remove: .review-loop/ not found."
 fi
 
 # Remove review-loop entry from .gitignore (current marker)
