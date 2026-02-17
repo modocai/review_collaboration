@@ -138,8 +138,6 @@ if [[ "$HAS_GH" == false ]]; then
   echo "Warning: 'gh' is not installed — PR commenting will be disabled."
 fi
 
-
-
 if ! git rev-parse --is-inside-work-tree &>/dev/null; then
   echo "Error: not inside a git repository."
   exit 1
