@@ -36,11 +36,15 @@ echo "Uninstalling review-loop from: $TARGET_DIR"
 
 # Remove installer-owned files inside .review-loop/ (current layout)
 if [[ -d "$TARGET_DIR/.review-loop" ]]; then
-  # bin/ (entirely installer-owned)
-  if [[ -d "$TARGET_DIR/.review-loop/bin" ]]; then
-    rm -rf "$TARGET_DIR/.review-loop/bin"
-    echo "Removed .review-loop/bin/"
-  fi
+  # bin/ — remove known installer binaries
+  for _bfile in review-loop.sh refactor-suggest.sh lib/common.sh; do
+    if [[ -f "$TARGET_DIR/.review-loop/bin/$_bfile" ]]; then
+      rm "$TARGET_DIR/.review-loop/bin/$_bfile"
+      echo "Removed .review-loop/bin/$_bfile"
+    fi
+  done
+  rmdir "$TARGET_DIR/.review-loop/bin/lib" 2>/dev/null && echo "Removed empty .review-loop/bin/lib/" || true
+  rmdir "$TARGET_DIR/.review-loop/bin" 2>/dev/null && echo "Removed empty .review-loop/bin/" || true
   # prompts/active/ — only remove known installer files
   for _pfile in codex-review.prompt.md claude-fix.prompt.md claude-fix-execute.prompt.md claude-self-review.prompt.md \
     codex-refactor-micro.prompt.md codex-refactor-module.prompt.md codex-refactor-layer.prompt.md codex-refactor-full.prompt.md \
