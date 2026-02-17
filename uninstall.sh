@@ -10,29 +10,45 @@ if [[ ! -d "$TARGET_DIR" ]]; then
 fi
 TARGET_DIR=$(cd "$TARGET_DIR" && pwd)
 
-if ! command -v perl &>/dev/null; then
-  echo "Error: 'perl' is required for uninstall but not found."
-  exit 1
-fi
+## Remove a marker+entry block from .gitignore, clean up if empty.
+## Usage: remove_gitignore_block <marker_line> <entry_regex> <label>
+remove_gitignore_block() {
+  local marker="$1" entry_re="$2" label="$3"
+  [[ -f "$GITIGNORE" ]] && grep -qxF "$marker" "$GITIGNORE" || return 0
+  local tmp
+  tmp=$(mktemp)
+  awk -v marker="$marker" -v entry="$entry_re" '
+    $0 == marker { skip=1; next }
+    skip && /^[[:space:]]*$/ { next }
+    skip && $0 ~ entry { skip=0; next }
+    { skip=0; print }
+  ' "$GITIGNORE" > "$tmp"
+  awk '{ lines[NR]=$0; if(NF) last=NR } END { for(i=1;i<=last;i++) print lines[i] }' "$tmp" > "$GITIGNORE"
+  rm -f "$tmp"
+  echo "Removed $label from .gitignore"
+  if [[ ! -s "$GITIGNORE" ]]; then
+    rm "$GITIGNORE"
+    echo "Removed empty .gitignore"
+  fi
+}
 
 echo "Uninstalling review-loop from: $TARGET_DIR"
 
 # Remove installer-owned files inside .review-loop/ (current layout)
 if [[ -d "$TARGET_DIR/.review-loop" ]]; then
-  # bin/lib/
-  if [[ -f "$TARGET_DIR/.review-loop/bin/lib/common.sh" ]]; then
-    rm "$TARGET_DIR/.review-loop/bin/lib/common.sh"
-    echo "Removed .review-loop/bin/lib/common.sh"
-  fi
+  # bin/ — remove known installer binaries
+  for _bfile in review-loop.sh refactor-suggest.sh lib/common.sh; do
+    if [[ -f "$TARGET_DIR/.review-loop/bin/$_bfile" ]]; then
+      rm "$TARGET_DIR/.review-loop/bin/$_bfile"
+      echo "Removed .review-loop/bin/$_bfile"
+    fi
+  done
   rmdir "$TARGET_DIR/.review-loop/bin/lib" 2>/dev/null && echo "Removed empty .review-loop/bin/lib/" || true
-  # bin/
-  if [[ -f "$TARGET_DIR/.review-loop/bin/review-loop.sh" ]]; then
-    rm "$TARGET_DIR/.review-loop/bin/review-loop.sh"
-    echo "Removed .review-loop/bin/review-loop.sh"
-  fi
   rmdir "$TARGET_DIR/.review-loop/bin" 2>/dev/null && echo "Removed empty .review-loop/bin/" || true
-  # prompts/active/
-  for _pfile in codex-review.prompt.md claude-fix.prompt.md claude-fix-execute.prompt.md claude-self-review.prompt.md; do
+  # prompts/active/ — only remove known installer files
+  for _pfile in codex-review.prompt.md claude-fix.prompt.md claude-fix-execute.prompt.md claude-self-review.prompt.md \
+    codex-refactor-micro.prompt.md codex-refactor-module.prompt.md codex-refactor-layer.prompt.md codex-refactor-full.prompt.md \
+    claude-refactor-fix.prompt.md claude-refactor-fix-execute.prompt.md; do
     if [[ -f "$TARGET_DIR/.review-loop/prompts/active/$_pfile" ]]; then
       rm "$TARGET_DIR/.review-loop/prompts/active/$_pfile"
       echo "Removed .review-loop/prompts/active/$_pfile"
@@ -45,81 +61,42 @@ if [[ -d "$TARGET_DIR/.review-loop" ]]; then
     rm -rf "$TARGET_DIR/.review-loop/logs"
     echo "Removed .review-loop/logs/"
   fi
-  # .reviewlooprc.example
-  if [[ -f "$TARGET_DIR/.review-loop/.reviewlooprc.example" ]]; then
-    rm "$TARGET_DIR/.review-loop/.reviewlooprc.example"
-    echo "Removed .review-loop/.reviewlooprc.example"
-  fi
+  # rc examples
+  for _rc in .reviewlooprc.example .refactorsuggestrc.example; do
+    if [[ -f "$TARGET_DIR/.review-loop/$_rc" ]]; then
+      rm "$TARGET_DIR/.review-loop/$_rc"
+      echo "Removed .review-loop/$_rc"
+    fi
+  done
   # Remove .review-loop/ only if empty (preserves user-added files)
   rmdir "$TARGET_DIR/.review-loop" 2>/dev/null && echo "Removed empty .review-loop/" || true
 fi
 
 # Remove legacy install layout (pre-.review-loop/ consolidation)
-_legacy_install=false
-if [[ -f "$TARGET_DIR/bin/review-loop.sh" ]] || [[ -d "$TARGET_DIR/prompts/active" ]]; then
-  _legacy_install=true
-fi
+_legacy_found=false
 if [[ -f "$TARGET_DIR/bin/review-loop.sh" ]]; then
+  _legacy_found=true
   rm "$TARGET_DIR/bin/review-loop.sh"
   echo "Removed bin/review-loop.sh"
   rmdir "$TARGET_DIR/bin" 2>/dev/null && echo "Removed empty bin/" || true
 fi
 for _pfile in codex-review.prompt.md claude-fix.prompt.md claude-fix-execute.prompt.md claude-self-review.prompt.md; do
   if [[ -f "$TARGET_DIR/prompts/active/$_pfile" ]]; then
+    _legacy_found=true
     rm "$TARGET_DIR/prompts/active/$_pfile"
     echo "Removed prompts/active/$_pfile"
   fi
 done
 rmdir "$TARGET_DIR/prompts/active" 2>/dev/null && echo "Removed empty prompts/active/" || true
 rmdir "$TARGET_DIR/prompts" 2>/dev/null && echo "Removed empty prompts/" || true
-# Only remove root .reviewlooprc.example for legacy installs — the current
-# installer places it inside .review-loop/ which is already removed above.
-if [[ "$_legacy_install" == true ]] && [[ -f "$TARGET_DIR/.reviewlooprc.example" ]]; then
+if [[ "$_legacy_found" == true ]] && [[ -f "$TARGET_DIR/.reviewlooprc.example" ]]; then
   rm "$TARGET_DIR/.reviewlooprc.example"
   echo "Removed legacy .reviewlooprc.example"
 fi
 
-# Remove review-loop entry from .gitignore (current marker)
+# Clean up .gitignore entries
 GITIGNORE="$TARGET_DIR/.gitignore"
-MARKER="# review-loop (added by installer)"
-if [[ -f "$GITIGNORE" ]] && grep -qxF "$MARKER" "$GITIGNORE"; then
-  TMP_GITIGNORE=$(mktemp)
-  awk -v marker="$MARKER" '
-    $0 == marker { skip=1; next }
-    skip && /^[[:space:]]*$/ { next }
-    skip && /^\.review-loop\/$/ { skip=0; next }
-    { skip=0; print }
-  ' "$GITIGNORE" > "$TMP_GITIGNORE"
-  # Remove trailing blank lines
-  perl -0777 -pe 's/\n+\z/\n/' "$TMP_GITIGNORE" > "$GITIGNORE"
-  rm -f "$TMP_GITIGNORE"
-  echo "Removed review-loop entries from .gitignore"
-  # Remove .gitignore if it became empty
-  if [[ ! -s "$GITIGNORE" ]]; then
-    rm "$GITIGNORE"
-    echo "Removed empty .gitignore"
-  fi
-fi
-
-# Remove legacy .ai-review-logs/ entry from .gitignore
-LEGACY_MARKER="# AI review logs (added by review-loop installer)"
-if [[ -f "$GITIGNORE" ]] && grep -qxF "$LEGACY_MARKER" "$GITIGNORE"; then
-  TMP_GITIGNORE=$(mktemp)
-  awk '
-    /^# AI review logs \(added by review-loop installer\)$/ { skip=1; next }
-    skip && /^[[:space:]]*$/ { next }
-    skip && /^\.ai-review-logs\/$/ { skip=0; next }
-    { skip=0; print }
-  ' "$GITIGNORE" > "$TMP_GITIGNORE"
-  # Remove trailing blank lines
-  perl -0777 -pe 's/\n+\z/\n/' "$TMP_GITIGNORE" > "$GITIGNORE"
-  rm -f "$TMP_GITIGNORE"
-  echo "Removed .ai-review-logs/ from .gitignore"
-  # Remove .gitignore if it became empty
-  if [[ ! -s "$GITIGNORE" ]]; then
-    rm "$GITIGNORE"
-    echo "Removed empty .gitignore"
-  fi
-fi
+remove_gitignore_block "# review-loop (added by installer)" '^\\.review-loop/$' "review-loop entries"
+remove_gitignore_block "# AI review logs (added by review-loop installer)" '^\\.ai-review-logs/$' ".ai-review-logs/ entry"
 
 echo "Done. review-loop has been uninstalled."
