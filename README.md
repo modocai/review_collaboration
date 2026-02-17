@@ -252,6 +252,7 @@ Each scope has a dedicated Codex prompt with scope-specific instructions, anti-p
 - **`codex-refactor-full.prompt.md`** — Architecture-level analysis.
 
 All four Codex prompts use `envsubst` variables: `${TARGET_BRANCH}`, `${ITERATION}`, `${SOURCE_FILES_PATH}`.
+
 - **`claude-refactor-fix.prompt.md`** — Opinion prompt: Claude evaluates refactoring findings with scope-aware judgment. Uses: `${REVIEW_JSON}`, `${CURRENT_BRANCH}`, `${TARGET_BRANCH}`.
 - **`claude-refactor-fix-execute.prompt.md`** — Execute prompt with safety guards (syntax check, scope overflow detection, regression testing).
 
