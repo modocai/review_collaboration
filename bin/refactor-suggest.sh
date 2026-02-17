@@ -194,10 +194,17 @@ REFACTOR_BRANCH="refactor/${SCOPE}-${TIMESTAMP}"
 if [[ "$DRY_RUN" == false ]]; then
   # Stash allowlisted files that may conflict with branch switch
   _needs_stash=false
-  if ! git diff --quiet -- .gitignore .refactorsuggestrc 2>/dev/null \
-     || ! git diff --cached --quiet -- .gitignore .refactorsuggestrc 2>/dev/null; then
+  _stash_files=()
+  for _sf in .gitignore .refactorsuggestrc; do
+    if git diff --name-only | grep -qx "$(printf '%s' "$_sf" | sed 's/[.[\*^$()+?{|]/\\&/g')" \
+    || git diff --cached --name-only | grep -qx "$(printf '%s' "$_sf" | sed 's/[.[\*^$()+?{|]/\\&/g')" \
+    || git ls-files --others --exclude-standard | grep -qx "$(printf '%s' "$_sf" | sed 's/[.[\*^$()+?{|]/\\&/g')"; then
+      _stash_files+=("$_sf")
+    fi
+  done
+  if [[ ${#_stash_files[@]} -gt 0 ]]; then
     _needs_stash=true
-    git stash push --quiet -- .gitignore .refactorsuggestrc
+    git stash push --quiet --include-untracked -- "${_stash_files[@]}"
   fi
 
   echo "Creating branch: $REFACTOR_BRANCH (from $TARGET_BRANCH)"
