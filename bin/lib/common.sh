@@ -164,14 +164,14 @@ _claude_two_step_fix() {
 # are never swept in.
 # $1 = snapshot file, $2 = commit message, $3 = branch name (for push hint)
 # Uses globals: none required.
-# Returns 0 on commit, 1 if nothing to commit.
+# Returns 0 on commit or if nothing to commit; non-zero on git failure.
 _commit_and_push() {
   local _snap="$1" _msg="$2" _branch="${3:-}"
   local _fix_files_nul
 
   if ! _fix_files_nul=$(_changed_files_since_snapshot "$_snap"); then
     echo "  No file changes after fix — nothing to commit."
-    return 1
+    return 0
   fi
 
   echo "[$(date +%H:%M:%S)] Committing fixes..."
