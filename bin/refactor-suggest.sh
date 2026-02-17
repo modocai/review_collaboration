@@ -238,10 +238,12 @@ if [[ "$DRY_RUN" == false ]]; then
   fi
 
   if [[ "$_needs_stash" == true ]]; then
-    if ! git stash pop --quiet; then
-      echo "Error: stash pop conflict while restoring .gitignore/.refactorsuggestrc." >&2
-      echo "  Resolve manually: git stash show, git stash drop" >&2
-      exit 1
+    if ! git stash pop --index --quiet 2>/dev/null; then
+      if ! git stash pop --quiet; then
+        echo "Error: stash pop conflict while restoring .gitignore/.refactorsuggestrc." >&2
+        echo "  Resolve manually: git stash show, git stash drop" >&2
+        exit 1
+      fi
     fi
   fi
   unset _needs_stash
@@ -299,6 +301,9 @@ for (( i=1; i<=MAX_LOOP; i++ )); do
   echo "───────────────────────────────────────────────────────"
 
   export ITERATION="$i"
+
+  # Refresh source file list (new files may have been committed in previous iterations)
+  git ls-files > "$SOURCE_FILES_PATH"
 
   # ── a. Codex analysis ────────────────────────────────────────────
   echo "[$(date +%H:%M:%S)] Running Codex refactoring analysis (scope: $SCOPE)..."
