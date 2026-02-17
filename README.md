@@ -174,7 +174,8 @@ SCOPE="micro"
 TARGET_BRANCH="develop"
 MAX_LOOP=3
 MAX_SUBLOOP=4
-DRY_RUN=true           # safe default — remove to apply fixes (script default: false)
+# DRY_RUN: safe default — remove to apply fixes (script default: false)
+DRY_RUN=true
 AUTO_APPROVE=false
 CREATE_PR=false
 PROMPTS_DIR="./custom-prompts"

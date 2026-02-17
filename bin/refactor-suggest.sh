@@ -467,7 +467,12 @@ for (( i=1; i<=MAX_LOOP; i++ )); do
       REFIX_FILE="$LOG_DIR/refix-${i}-${j}.md"
       REFIX_OPINION_FILE="$LOG_DIR/refix-opinion-${i}-${j}.md"
 
-      if ! _claude_two_step_fix "$SELF_REVIEW_JSON" "$REFIX_OPINION_FILE" "$REFIX_FILE" "re-fix" \
+      # Carry over refactoring_plan from original review so scope-aware prompts work
+      REFIX_INPUT_JSON=$(printf '%s' "$SELF_REVIEW_JSON" | jq --argjson plan \
+        "$(printf '%s' "$ORIGINAL_REVIEW_JSON" | jq '.refactoring_plan // empty')" \
+        'if $plan then . + {refactoring_plan: $plan} else . end')
+
+      if ! _claude_two_step_fix "$REFIX_INPUT_JSON" "$REFIX_OPINION_FILE" "$REFIX_FILE" "re-fix" \
         "claude-refactor-fix.prompt.md" "claude-refactor-fix-execute.prompt.md"; then
         SELF_REVIEW_SUMMARY="${SELF_REVIEW_SUMMARY}Sub-iteration $j: $SR_FINDINGS findings — re-fix failed\n"
         break
