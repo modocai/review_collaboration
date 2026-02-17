@@ -13,3 +13,10 @@
 - [FIXED] <finding title>: <변경 내용>
 - [SKIPPED] <finding title>: <SKIP 사유>
 ```
+
+## Safety Guards
+
+- 각 step 실행 후, 변경한 파일이 shell script라면 `bash -n <file>`로 syntax check해. syntax error가 있으면 즉시 되돌리고 해당 finding을 SKIP 처리해.
+- 변경 범위가 finding의 scope(micro/module/layer/full)를 넘어서면 중단하고 해당 finding을 SKIP 처리해. 예: micro scope finding인데 다른 파일까지 수정이 필요한 경우.
+- SKIP 처리한 finding이 자신의 변경에 의해 발생한 문제인 경우, 해당 변경도 함께 되돌려라.
+- 기존 테스트가 있으면 (`tests/` 디렉토리 확인) 관련 테스트를 실행해서 regression이 없는지 확인해.

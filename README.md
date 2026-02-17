@@ -65,10 +65,15 @@ npm install -g @anthropic-ai/claude-code  # Claude Code CLI
 
 ```bash
 # In your project directory (after install):
+
+# Review loop — review and fix diffs against target branch
 .review-loop/bin/review-loop.sh -n 3
+
+# Refactor suggest — analyze full codebase for refactoring opportunities
+.review-loop/bin/refactor-suggest.sh --scope micro -n 1 --dry-run
 ```
 
-## Usage
+## Usage: review-loop.sh
 
 ```
 review-loop.sh [OPTIONS]
@@ -91,9 +96,62 @@ Examples:
   review-loop.sh --version             # print version
 ```
 
-## Configuration (.reviewlooprc)
+## Usage: refactor-suggest.sh
 
-Create a `.reviewlooprc` file in your project root to set defaults. CLI arguments always take precedence.
+Unlike `review-loop.sh` which reviews diffs, `refactor-suggest.sh` analyzes the **entire codebase** for refactoring opportunities at a chosen scope level.
+
+```
+refactor-suggest.sh [OPTIONS]
+
+Options:
+  --scope <scope>          Refactoring scope: micro|module|layer|full (default: micro)
+  -t, --target <branch>    Target branch to base from (default: develop)
+  -n, --max-loop <N>       Maximum analysis-fix iterations (required)
+  --max-subloop <N>        Maximum self-review sub-iterations per fix (default: 4)
+  --no-self-review         Disable self-review (equivalent to --max-subloop 0)
+  --dry-run                Run analysis only, do not apply fixes
+  --no-dry-run             Force fixes even if .refactorsuggestrc sets DRY_RUN=true
+  --auto-approve           Skip interactive confirmation for layer/full scope
+  --create-pr              Create a draft PR after completing all iterations
+  -V, --version            Show version
+  -h, --help               Show this help message
+
+Examples:
+  refactor-suggest.sh --scope micro -n 3              # function/file-level fixes
+  refactor-suggest.sh --scope module -n 2 --dry-run   # analyze module duplication
+  refactor-suggest.sh --scope layer -n 1 --auto-approve  # cross-cutting concerns
+  refactor-suggest.sh --scope full -n 1 --create-pr   # architecture redesign + PR
+```
+
+### Scopes
+
+| Scope | What it looks for | Blast radius |
+|-------|-------------------|--------------|
+| `micro` | Complex functions, dead code, in-file duplication | Low — single file |
+| `module` | Cross-file duplication, module boundary issues | Low-medium — within a module |
+| `layer` | Inconsistent error handling, logging, config patterns | Medium-high — across modules |
+| `full` | Wrong abstractions, inverted dependencies, layer violations | High-critical — project-wide |
+
+### How refactor-suggest works
+
+```
+1. Collect source file list (git ls-files)
+2. Codex analyzes the full codebase for scope-specific refactoring opportunities
+3. (layer/full) Display refactoring plan and wait for confirmation
+4. Claude applies refactoring (two-step: opinion → execute)
+5. Claude self-reviews changes, re-fixes if needed
+6. Auto-commit & push to refactoring branch
+7. Repeat until clean or max iterations reached
+8. (--create-pr) Create draft PR
+```
+
+Recommended workflow: start with `--dry-run` to review findings, then re-run without it to apply.
+
+## Configuration
+
+### .reviewlooprc
+
+Create a `.reviewlooprc` file in your project root to set defaults for `review-loop.sh`. CLI arguments always take precedence.
 
 ```bash
 # .reviewlooprc
@@ -106,7 +164,24 @@ PROMPTS_DIR="./custom-prompts"
 
 See `.review-loop/.reviewlooprc.example` for all available options.
 
-## How It Works
+### .refactorsuggestrc
+
+Create a `.refactorsuggestrc` file in your project root to set defaults for `refactor-suggest.sh`.
+
+```bash
+# .refactorsuggestrc
+SCOPE="micro"
+TARGET_BRANCH="develop"
+MAX_LOOP=3
+MAX_SUBLOOP=4
+# DRY_RUN: safe default — remove to apply fixes (script default: false)
+DRY_RUN=true
+AUTO_APPROVE=false
+CREATE_PR=false
+PROMPTS_DIR="./custom-prompts"
+```
+
+## How review-loop works
 
 ```
 1. Check prerequisites (git, codex, claude, jq, envsubst, target branch)
@@ -130,7 +205,9 @@ See `.review-loop/.reviewlooprc.example` for all available options.
 
 ## Output Files
 
-All logs are saved to `.review-loop/logs/` (git-ignored by default):
+All logs are git-ignored by default.
+
+### review-loop logs (`logs/`)
 
 | File | Description |
 |------|-------------|
@@ -142,14 +219,43 @@ All logs are saved to `.review-loop/logs/` (git-ignored by default):
 | `refix-N-M.md` | Claude re-fix log (iteration N, sub-iteration M) |
 | `summary.md` | Final summary with status and per-iteration results |
 
+### refactor-suggest logs (`logs/refactor/`)
+
+| File | Description |
+|------|-------------|
+| `source-files.txt` | List of files analyzed (from `git ls-files`) |
+| `review-N.json` | Codex refactoring analysis for iteration N |
+| `opinion-N.md` | Claude's opinion on refactoring findings (iteration N) |
+| `fix-N.md` | Claude fix log for iteration N |
+| `self-review-N-M.json` | Claude self-review (iteration N, sub-iteration M) |
+| `refix-opinion-N-M.md` | Claude's opinion on self-review findings |
+| `refix-N-M.md` | Claude re-fix log (iteration N, sub-iteration M) |
+| `summary.md` | Final summary with scope, status, and per-iteration results |
+
 ## Customizing Prompts
 
-Edit the templates in `.review-loop/prompts/active/` (or `prompts/active/` in the source repo):
+Edit the templates in `.review-loop/prompts/active/` (or `prompts/active/` in the source repo).
+
+### review-loop prompts
 
 - **`codex-review.prompt.md`** — Review prompt sent to Codex. Uses `envsubst` variables: `${CURRENT_BRANCH}`, `${TARGET_BRANCH}`, `${ITERATION}`.
 - **`claude-fix.prompt.md`** — Opinion prompt: Claude evaluates review findings. Uses: `${REVIEW_JSON}`, `${CURRENT_BRANCH}`, `${TARGET_BRANCH}`.
 - **`claude-fix-execute.prompt.md`** — Execute prompt: tells Claude to fix based on its opinion.
 - **`claude-self-review.prompt.md`** — Self-review prompt for Claude to check its own fixes. Uses: `${REVIEW_JSON}`, `${CURRENT_BRANCH}`, `${TARGET_BRANCH}`, `${ITERATION}`.
+
+### refactor-suggest prompts
+
+Each scope has a dedicated Codex prompt with scope-specific instructions, anti-pattern guardrails, and good/bad finding examples:
+
+- **`codex-refactor-micro.prompt.md`** — Function/file-level analysis.
+- **`codex-refactor-module.prompt.md`** — Module duplication and boundary analysis.
+- **`codex-refactor-layer.prompt.md`** — Cross-cutting concern analysis.
+- **`codex-refactor-full.prompt.md`** — Architecture-level analysis.
+
+All four Codex prompts use `envsubst` variables: `${TARGET_BRANCH}`, `${ITERATION}`, `${SOURCE_FILES_PATH}`.
+
+- **`claude-refactor-fix.prompt.md`** — Opinion prompt: Claude evaluates refactoring findings with scope-aware judgment. Uses: `${REVIEW_JSON}`, `${CURRENT_BRANCH}`, `${TARGET_BRANCH}`.
+- **`claude-refactor-fix-execute.prompt.md`** — Execute prompt with safety guards (syntax check, scope overflow detection, regression testing).
 
 Reference prompts (read-only originals) are in `prompts/reference/`.
 
