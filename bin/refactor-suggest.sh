@@ -153,7 +153,7 @@ check_cmd jq
 check_cmd envsubst
 check_cmd perl
 
-if [[ "$CREATE_PR" == true ]] && [[ "$HAS_GH" == false ]]; then
+if [[ "$CREATE_PR" == true ]] && [[ "$HAS_GH" == false ]] && [[ "$DRY_RUN" == false ]]; then
   echo "Error: --create-pr requires 'gh' CLI."
   exit 1
 fi
@@ -231,7 +231,11 @@ if [[ "$DRY_RUN" == false ]]; then
   fi
 
   echo "Creating branch: $REFACTOR_BRANCH (from $TARGET_BRANCH)"
-  git checkout -b "$REFACTOR_BRANCH" "$TARGET_BRANCH"
+  if ! git checkout -b "$REFACTOR_BRANCH" "$TARGET_BRANCH"; then
+    [[ "$_needs_stash" == true ]] && git stash pop --quiet 2>/dev/null
+    echo "Error: failed to create branch $REFACTOR_BRANCH" >&2
+    exit 1
+  fi
 
   if [[ "$_needs_stash" == true ]]; then
     if ! git stash pop --quiet; then
@@ -359,7 +363,7 @@ for (( i=1; i<=MAX_LOOP; i++ )); do
   if [[ "$SCOPE" == "layer" || "$SCOPE" == "full" ]] && [[ "$AUTO_APPROVE" == false ]]; then
     echo ""
     echo "  Refactoring plan:"
-    printf '%s' "$REVIEW_JSON" | jq -r '.refactoring_plan | "  Summary: \(.summary)\n  Blast radius: \(.estimated_blast_radius)\n  Steps:", (.steps[] | "    \(.order). \(.description) [\(.files | join(", "))]")'
+    printf '%s' "$REVIEW_JSON" | jq -r '.refactoring_plan // empty | "  Summary: \(.summary // "N/A")\n  Blast radius: \(.estimated_blast_radius // "N/A")\n  Steps:", (.steps[]? | "    \(.order). \(.description) [\(.files | join(", "))]")'
     echo ""
     read -r -p "  Apply this plan? [y/N] " _confirm
     if [[ "$_confirm" != "y" && "$_confirm" != "Y" ]]; then
