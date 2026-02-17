@@ -119,16 +119,20 @@ _changed_files_since_snapshot() {
 # ── Claude Two-Step Execution ────────────────────────────────────────
 # Two-step Claude fix: opinion (read-only) → execute (edit tools).
 # $1 = review JSON, $2 = opinion output file, $3 = fix output file, $4 = label
+# $5 = opinion prompt filename (optional, default: claude-fix.prompt.md)
+# $6 = execute prompt filename (optional, default: claude-fix-execute.prompt.md)
 # Uses globals: CURRENT_BRANCH, TARGET_BRANCH, PROMPTS_DIR (read-only)
 # Does not modify global state.
 # Returns 1 on failure; caller handles FINAL_STATUS/cleanup.
 _claude_two_step_fix() {
   local _rjson="$1" _opinion_file="$2" _fix_file="$3" _label="$4"
+  local _opinion_prompt="${5:-claude-fix.prompt.md}"
+  local _execute_prompt="${6:-claude-fix-execute.prompt.md}"
   local _session_id _prompt _exec_prompt
 
   _session_id=$(_gen_uuid)
 
-  _prompt=$(REVIEW_JSON="$_rjson" envsubst '$CURRENT_BRANCH $TARGET_BRANCH $REVIEW_JSON' < "$PROMPTS_DIR/claude-fix.prompt.md")
+  _prompt=$(REVIEW_JSON="$_rjson" envsubst '$CURRENT_BRANCH $TARGET_BRANCH $REVIEW_JSON' < "$PROMPTS_DIR/$_opinion_prompt")
 
   echo "[$(date +%H:%M:%S)] Running Claude $_label (step 1: opinion)..."
   if ! printf '%s' "$_prompt" | claude -p - \
@@ -141,7 +145,7 @@ _claude_two_step_fix() {
   echo "  Opinion saved to $_opinion_file"
 
   echo "[$(date +%H:%M:%S)] Running Claude $_label (step 2: execute)..."
-  _exec_prompt=$(cat "$PROMPTS_DIR/claude-fix-execute.prompt.md")
+  _exec_prompt=$(cat "$PROMPTS_DIR/$_execute_prompt")
 
   if ! printf '%s' "$_exec_prompt" | claude -p - \
     --resume "$_session_id" \
@@ -151,6 +155,90 @@ _claude_two_step_fix() {
     return 1
   fi
   echo "  $_label log saved to $_fix_file"
+}
+
+# ── Commit & Push ───────────────────────────────────────────────────
+# Commit files changed since a snapshot and push if upstream exists.
+# Only files that are newly dirty or have different content vs the snapshot
+# are committed, so pre-existing changes (e.g. installer's .gitignore)
+# are never swept in.
+# $1 = snapshot file, $2 = commit message, $3 = branch name (for push hint)
+# Uses globals: none required.
+# Returns 0 on commit or if nothing to commit; non-zero on git failure.
+_commit_and_push() {
+  local _snap="$1" _msg="$2" _branch="${3:-}"
+  local _fix_files_nul
+
+  if ! _fix_files_nul=$(_changed_files_since_snapshot "$_snap"); then
+    echo "  No file changes after fix — nothing to commit."
+    return 0
+  fi
+
+  echo "[$(date +%H:%M:%S)] Committing fixes..."
+  git reset --quiet --pathspec-from-file="$_fix_files_nul" --pathspec-file-nul HEAD 2>/dev/null || true
+  git add --pathspec-from-file="$_fix_files_nul" --pathspec-file-nul
+  git commit -m "$_msg" --pathspec-from-file="$_fix_files_nul" --pathspec-file-nul
+  rm -f "$_fix_files_nul"
+  echo "  Committed."
+
+  # Push to update PR (if remote tracking exists)
+  if git rev-parse --abbrev-ref --symbolic-full-name "@{u}" &>/dev/null; then
+    echo "[$(date +%H:%M:%S)] Pushing to remote..."
+    git push
+    echo "  Pushed."
+  else
+    local _remote
+    _remote=$(git remote | grep -m1 '^origin$' || git remote | head -1)
+    if [[ -n "$_branch" ]] && [[ -n "$_remote" ]]; then
+      echo "[$(date +%H:%M:%S)] Setting upstream and pushing..."
+      git push -u "$_remote" "$_branch"
+      echo "  Pushed (upstream set)."
+    else
+      echo "  No upstream/remote set — skipping push."
+    fi
+  fi
+  return 0
+}
+
+# ── Summary Generation ──────────────────────────────────────────────
+# Generate summary.md from iteration logs.
+# $1 = title (e.g. "Review Loop Summary", "Refactor Suggest Summary")
+# Additional lines can be passed as $2..$N and are inserted after the title.
+# Uses globals: LOG_DIR, CURRENT_BRANCH, TARGET_BRANCH, MAX_LOOP, FINAL_STATUS
+_generate_summary() {
+  local _title="$1"; shift
+  local SUMMARY_FILE="$LOG_DIR/summary.md"
+  {
+    echo "# $_title"
+    echo ""
+    local _extra
+    for _extra in "$@"; do
+      echo "$_extra"
+    done
+    echo "- **Branch**: $CURRENT_BRANCH → $TARGET_BRANCH"
+    echo "- **Max iterations**: $MAX_LOOP"
+    echo "- **Final status**: $FINAL_STATUS"
+    echo "- **Timestamp**: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    echo ""
+    echo "## Iteration Logs"
+    echo ""
+    local f iter count verdict sf sub_iter sr_count sr_verdict
+    for f in "$LOG_DIR"/review-*.json; do
+      [[ -e "$f" ]] || continue
+      iter=$(basename "$f" | sed 's/review-//;s/.json//')
+      count=$(jq '.findings | length' "$f" 2>/dev/null || echo "?")
+      verdict=$(jq -r '.overall_correctness' "$f" 2>/dev/null || echo "?")
+      echo "- **Iteration $iter**: $count findings, verdict: $verdict"
+      for sf in "$LOG_DIR"/self-review-"${iter}"-*.json; do
+        [[ -e "$sf" ]] || continue
+        sub_iter=$(basename "$sf" | sed "s/self-review-${iter}-//;s/.json//")
+        sr_count=$(jq '.findings | length' "$sf" 2>/dev/null || echo "?")
+        sr_verdict=$(jq -r '.overall_correctness' "$sf" 2>/dev/null || echo "?")
+        echo "  - Sub-iteration $sub_iter: $sr_count findings, verdict: $sr_verdict"
+      done
+    done
+  } > "$SUMMARY_FILE"
+  printf '%s' "$SUMMARY_FILE"
 }
 
 # ── PR Commenting ────────────────────────────────────────────────────
