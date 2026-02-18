@@ -39,6 +39,11 @@ if [[ -f "$SCRIPT_DIR/.refactorsuggestrc.example" ]]; then
   echo "Copied .refactorsuggestrc.example"
 fi
 
+# Generate install manifest (relative paths from $INSTALL_DIR)
+find "$INSTALL_DIR" -type f ! -name '.install-manifest' ! -path '*/logs/*' \
+  | sed "s|^${INSTALL_DIR}/||" | sort > "$INSTALL_DIR/.install-manifest"
+echo "Generated .install-manifest ($(wc -l < "$INSTALL_DIR/.install-manifest") files)"
+
 # Add .review-loop/ to .gitignore
 GITIGNORE="$TARGET_DIR/.gitignore"
 MARKER="# review-loop (added by installer)"

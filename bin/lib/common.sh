@@ -44,6 +44,39 @@ _git_all_dirty_nul() {
     | perl -0 -e 'my %seen; while (defined(my $l = <>)) { chomp $l; print "$l\0" unless $seen{$l}++ }'
 }
 
+# ── Allowlisted Dirty-File Stash ──────────────────────────────────────
+# Stash specific allowlisted files if they are dirty/untracked.
+# Usage: _stash_allowlisted FILE...
+# Returns 0 if files were stashed, 1 if nothing to stash.
+_stash_allowlisted() {
+  local _files=() _f _escaped
+  for _f in "$@"; do
+    _escaped=$(printf '%s' "$_f" | sed 's/[.[\*^$()+?{|]/\\&/g')
+    if git diff --name-only | grep -qx "$_escaped" \
+    || git diff --cached --name-only | grep -qx "$_escaped" \
+    || git ls-files --others --exclude-standard | grep -qx "$_escaped"; then
+      _files+=("$_f")
+    fi
+  done
+  if [[ ${#_files[@]} -gt 0 ]]; then
+    git stash push --quiet --include-untracked -- "${_files[@]}" 2>/dev/null
+    return $?
+  fi
+  return 1
+}
+
+# Pop the most recent stash entry (counterpart to _stash_allowlisted).
+# Returns 0 on success, 1 on failure.
+_unstash_allowlisted() {
+  if git stash pop --index --quiet 2>/dev/null; then
+    return 0
+  fi
+  if git stash pop --quiet 2>/dev/null; then
+    return 0
+  fi
+  return 1
+}
+
 # ── JSON Parsing ─────────────────────────────────────────────────────
 # 3-tier JSON extraction: direct jq → sed fence → perl regex
 # $1 = file path; stdout = JSON

@@ -211,17 +211,8 @@ REFACTOR_BRANCH="refactor/${SCOPE}-${TIMESTAMP}"
 if [[ "$DRY_RUN" == false ]]; then
   # Stash allowlisted files that may conflict with branch switch
   _needs_stash=false
-  _stash_files=()
-  for _sf in .gitignore .refactorsuggestrc .reviewlooprc; do
-    if git diff --name-only | grep -qx "$(printf '%s' "$_sf" | sed 's/[.[\*^$()+?{|]/\\&/g')" \
-    || git diff --cached --name-only | grep -qx "$(printf '%s' "$_sf" | sed 's/[.[\*^$()+?{|]/\\&/g')" \
-    || git ls-files --others --exclude-standard | grep -qx "$(printf '%s' "$_sf" | sed 's/[.[\*^$()+?{|]/\\&/g')"; then
-      _stash_files+=("$_sf")
-    fi
-  done
-  if [[ ${#_stash_files[@]} -gt 0 ]]; then
+  if _stash_allowlisted .gitignore .refactorsuggestrc .reviewlooprc; then
     _needs_stash=true
-    git stash push --quiet --include-untracked -- "${_stash_files[@]}"
   fi
 
   echo "Creating branch: $REFACTOR_BRANCH (from $TARGET_BRANCH)"
@@ -232,12 +223,10 @@ if [[ "$DRY_RUN" == false ]]; then
   fi
 
   if [[ "$_needs_stash" == true ]]; then
-    if ! git stash pop --index --quiet 2>/dev/null; then
-      if ! git stash pop --quiet; then
-        echo "Error: stash pop conflict while restoring .gitignore/.refactorsuggestrc/.reviewlooprc." >&2
-        echo "  Resolve manually: git stash show, git stash drop" >&2
-        exit 1
-      fi
+    if ! _unstash_allowlisted; then
+      echo "Error: stash pop conflict while restoring .gitignore/.refactorsuggestrc/.reviewlooprc." >&2
+      echo "  Resolve manually: git stash show, git stash drop" >&2
+      exit 1
     fi
   fi
   unset _needs_stash
@@ -275,11 +264,9 @@ _allowed_dirty_stashed=false
 _cleanup() {
   rm -f "${PRE_FIX_STATE:-}"
   if [[ "${_allowed_dirty_stashed:-false}" == true ]]; then
-    if ! git stash pop --index --quiet 2>/dev/null; then
-      if ! git stash pop --quiet 2>/dev/null; then
-        echo "  Error: failed to restore stashed edits. Check 'git stash list'." >&2
-        FINAL_STATUS="stash_conflict"
-      fi
+    if ! _unstash_allowlisted; then
+      echo "  Error: failed to restore stashed edits. Check 'git stash list'." >&2
+      FINAL_STATUS="stash_conflict"
     fi
     _allowed_dirty_stashed=false
   fi
@@ -374,16 +361,8 @@ for (( i=1; i<=MAX_LOOP; i++ )); do
 
   # ── Stash allowed dirty files ───────────────────────────────────
   _allowed_dirty_stashed=false
-  _allowed_dirty_files=()
-  for _adf in .gitignore .refactorsuggestrc .reviewlooprc; do
-    if git diff --name-only | grep -qx "$(printf '%s' "$_adf" | sed 's/[.[\*^$()+?{|]/\\&/g')" \
-    || git diff --cached --name-only | grep -qx "$(printf '%s' "$_adf" | sed 's/[.[\*^$()+?{|]/\\&/g')" \
-    || git ls-files --others --exclude-standard | grep -qx "$(printf '%s' "$_adf" | sed 's/[.[\*^$()+?{|]/\\&/g')"; then
-      _allowed_dirty_files+=("$_adf")
-    fi
-  done
-  if [[ ${#_allowed_dirty_files[@]} -gt 0 ]]; then
-    git stash push --quiet --include-untracked -- "${_allowed_dirty_files[@]}" 2>/dev/null && _allowed_dirty_stashed=true
+  if _stash_allowlisted .gitignore .refactorsuggestrc .reviewlooprc; then
+    _allowed_dirty_stashed=true
   fi
 
   # ── Snapshot pre-fix working tree state ─────────────────────────

@@ -36,40 +36,56 @@ echo "Uninstalling review-loop from: $TARGET_DIR"
 
 # Remove installer-owned files inside .review-loop/ (current layout)
 if [[ -d "$TARGET_DIR/.review-loop" ]]; then
-  # bin/ — remove known installer binaries
-  for _bfile in review-loop.sh refactor-suggest.sh lib/common.sh; do
-    if [[ -f "$TARGET_DIR/.review-loop/bin/$_bfile" ]]; then
-      rm "$TARGET_DIR/.review-loop/bin/$_bfile"
-      echo "Removed .review-loop/bin/$_bfile"
-    fi
-  done
-  rmdir "$TARGET_DIR/.review-loop/bin/lib" 2>/dev/null && echo "Removed empty .review-loop/bin/lib/" || true
-  rmdir "$TARGET_DIR/.review-loop/bin" 2>/dev/null && echo "Removed empty .review-loop/bin/" || true
-  # prompts/active/ — only remove known installer files
-  for _pfile in codex-review.prompt.md claude-fix.prompt.md claude-fix-execute.prompt.md claude-self-review.prompt.md \
-    codex-refactor-micro.prompt.md codex-refactor-module.prompt.md codex-refactor-layer.prompt.md codex-refactor-full.prompt.md \
-    claude-refactor-fix.prompt.md claude-refactor-fix-execute.prompt.md; do
-    if [[ -f "$TARGET_DIR/.review-loop/prompts/active/$_pfile" ]]; then
-      rm "$TARGET_DIR/.review-loop/prompts/active/$_pfile"
-      echo "Removed .review-loop/prompts/active/$_pfile"
-    fi
-  done
-  rmdir "$TARGET_DIR/.review-loop/prompts/active" 2>/dev/null && echo "Removed empty .review-loop/prompts/active/" || true
-  rmdir "$TARGET_DIR/.review-loop/prompts" 2>/dev/null && echo "Removed empty .review-loop/prompts/" || true
+  _install_dir="$TARGET_DIR/.review-loop"
+
+  if [[ -f "$_install_dir/.install-manifest" ]]; then
+    # Manifest-driven removal
+    while IFS= read -r _entry; do
+      [[ -n "$_entry" ]] || continue
+      if [[ -f "$_install_dir/$_entry" ]]; then
+        rm "$_install_dir/$_entry"
+        echo "Removed .review-loop/$_entry"
+      fi
+    done < "$_install_dir/.install-manifest"
+    rm "$_install_dir/.install-manifest"
+    echo "Removed .install-manifest"
+    # Clean up empty directories left behind
+    find "$_install_dir" -mindepth 1 -type d -empty -delete 2>/dev/null || true
+  else
+    # Legacy fallback: hardcoded file list (pre-manifest installs)
+    for _bfile in review-loop.sh refactor-suggest.sh lib/common.sh lib/check-claude-limit.sh; do
+      if [[ -f "$_install_dir/bin/$_bfile" ]]; then
+        rm "$_install_dir/bin/$_bfile"
+        echo "Removed .review-loop/bin/$_bfile"
+      fi
+    done
+    rmdir "$_install_dir/bin/lib" 2>/dev/null && echo "Removed empty .review-loop/bin/lib/" || true
+    rmdir "$_install_dir/bin" 2>/dev/null && echo "Removed empty .review-loop/bin/" || true
+    for _pfile in codex-review.prompt.md claude-fix.prompt.md claude-fix-execute.prompt.md claude-self-review.prompt.md \
+      codex-refactor-micro.prompt.md codex-refactor-module.prompt.md codex-refactor-layer.prompt.md codex-refactor-full.prompt.md \
+      claude-refactor-fix.prompt.md claude-refactor-fix-execute.prompt.md; do
+      if [[ -f "$_install_dir/prompts/active/$_pfile" ]]; then
+        rm "$_install_dir/prompts/active/$_pfile"
+        echo "Removed .review-loop/prompts/active/$_pfile"
+      fi
+    done
+    rmdir "$_install_dir/prompts/active" 2>/dev/null && echo "Removed empty .review-loop/prompts/active/" || true
+    rmdir "$_install_dir/prompts" 2>/dev/null && echo "Removed empty .review-loop/prompts/" || true
+    for _rc in .reviewlooprc.example .refactorsuggestrc.example; do
+      if [[ -f "$_install_dir/$_rc" ]]; then
+        rm "$_install_dir/$_rc"
+        echo "Removed .review-loop/$_rc"
+      fi
+    done
+  fi
+
   # logs/ (runtime artifacts)
-  if [[ -d "$TARGET_DIR/.review-loop/logs" ]]; then
-    rm -rf "$TARGET_DIR/.review-loop/logs"
+  if [[ -d "$_install_dir/logs" ]]; then
+    rm -rf "$_install_dir/logs"
     echo "Removed .review-loop/logs/"
   fi
-  # rc examples
-  for _rc in .reviewlooprc.example .refactorsuggestrc.example; do
-    if [[ -f "$TARGET_DIR/.review-loop/$_rc" ]]; then
-      rm "$TARGET_DIR/.review-loop/$_rc"
-      echo "Removed .review-loop/$_rc"
-    fi
-  done
   # Remove .review-loop/ only if empty (preserves user-added files)
-  rmdir "$TARGET_DIR/.review-loop" 2>/dev/null && echo "Removed empty .review-loop/" || true
+  rmdir "$_install_dir" 2>/dev/null && echo "Removed empty .review-loop/" || true
 fi
 
 # Remove legacy install layout (pre-.review-loop/ consolidation)
