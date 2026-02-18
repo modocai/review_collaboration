@@ -13,7 +13,7 @@ _CHECK_CLAUDE_LIMIT_SH_LOADED=1
 
 # ── Internal: Detect subscription tier ───────────────────────────────
 # Reads rateLimitTier from Claude Code telemetry files.
-# Picks the most recent record by client_timestamp to handle plan changes.
+# Picks the most recent record by timestamp to handle plan changes.
 # stdout: tier slug (pro, max5, max20)
 _claude_limit_detect_tier() {
   local _tier_raw="" _f
@@ -29,7 +29,7 @@ _claude_limit_detect_tier() {
            | if type == "string" then fromjson else . end
            | .rateLimitTier // empty) as $tier
         | select($tier != "")
-        | [.client_timestamp, $tier] | @tsv
+        | [(.client_timestamp // .timestamp // ""), $tier] | @tsv
       ' "$_f" 2>/dev/null
     done | sort -t$'\t' -k1,1r | head -1 | cut -f2
   )
