@@ -49,12 +49,11 @@ _git_all_dirty_nul() {
 # Usage: _stash_allowlisted FILE...
 # Returns 0 if files were stashed, 1 if nothing to stash.
 _stash_allowlisted() {
-  local _files=() _f _escaped
+  local _files=() _f _dirty
+  # Collect all dirty/untracked files once (avoids per-file git calls)
+  _dirty=$({ git diff --name-only; git diff --cached --name-only; git ls-files --others --exclude-standard; } 2>/dev/null | sort -u)
   for _f in "$@"; do
-    _escaped=$(printf '%s' "$_f" | sed 's/[.[\*^$()+?{|]/\\&/g')
-    if git diff --name-only | grep -qx "$_escaped" \
-    || git diff --cached --name-only | grep -qx "$_escaped" \
-    || git ls-files --others --exclude-standard | grep -qx "$_escaped"; then
+    if printf '%s\n' "$_dirty" | grep -qxF "$_f"; then
       _files+=("$_f")
     fi
   done
