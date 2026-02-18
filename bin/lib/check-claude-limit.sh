@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Claude Code token-budget checker.
 # Source this file for library use, or run standalone for human-readable output.
+# Requires: caller must set -euo pipefail before sourcing.
 # Requires: jq (mandatory), curl + security (for OAuth mode, macOS only)
 # Usage:
 #   source "$SCRIPT_DIR/lib/check-claude-limit.sh"
@@ -106,7 +107,7 @@ _claude_limit_local() {
 
   # Calculate the cutoff timestamp (5 hours ago) in ISO format
   local _cutoff
-  if date -v-5H +%Y-%m-%dT%H:%M:%S 2>/dev/null | grep -q '^[0-9]'; then
+  if date -v-5H +%s &>/dev/null; then
     # macOS/BSD date
     _cutoff=$(date -u -v-5H +%Y-%m-%dT%H:%M:%SZ)
   else
@@ -225,9 +226,12 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   echo "  micro:  <90%   module: <75%   layer: <50%   full: <30%"
   echo ""
 
-  # Show go/no-go for each scope
-  for _s in micro module layer full; do
-    if _claude_budget_sufficient "$_s" 2>/dev/null; then
+  # Show go/no-go for each scope (reuse _pct to avoid redundant API calls)
+  _thresholds="micro:90 module:75 layer:50 full:30"
+  for _entry in $_thresholds; do
+    _s="${_entry%%:*}"
+    _thr="${_entry##*:}"
+    if [[ "$_pct" -lt "$_thr" ]]; then
       printf '  %-8s GO\n' "$_s:"
     else
       printf '  %-8s NO-GO\n' "$_s:"
