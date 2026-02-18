@@ -232,6 +232,42 @@ All logs are git-ignored by default.
 | `refix-N-M.md` | Claude re-fix log (iteration N, sub-iteration M) |
 | `summary.md` | Final summary with scope, status, and per-iteration results |
 
+## Token Budget Checker
+
+`bin/lib/check-claude-limit.sh` checks Claude Code's 5-hour rate limit **before** starting expensive loops. It can be sourced as a library or run standalone.
+
+```bash
+# Standalone — human-readable summary
+.review-loop/bin/lib/check-claude-limit.sh
+
+# Library — source and call functions
+source .review-loop/bin/lib/check-claude-limit.sh
+_check_claude_token_budget          # JSON to stdout
+_claude_budget_sufficient module     # exit 0 = go, exit 1 = no-go
+```
+
+### How it estimates usage
+
+The checker tries two methods in order:
+
+| Mode | Data source | Accuracy |
+|------|-------------|----------|
+| **OAuth** (primary) | macOS Keychain → `security find-generic-password` → Anthropic OAuth API (`/oauth/usage`) | Exact — returns `five_hour.utilization` and `seven_day.utilization` directly from Anthropic |
+| **Local** (fallback) | `~/.claude/projects/**/*.jsonl` session files — sums `input_tokens + output_tokens + cache_creation_input_tokens + cache_read_input_tokens` from `message.usage` of assistant messages in the last 5 hours | Estimated — actual server-side limits are opaque; weekly usage (`seven_day_used_pct`) is unavailable (`null`) |
+
+**Tier detection** reads `rateLimitTier` from `~/.claude/telemetry/*.json` (field `event_data.user_attributes`). Mapping: `default` → pro, `default_claude_max_5x` → max5, `default_claude_max_20x` → max20.
+
+### Scope thresholds
+
+Go/no-go decision based on current usage percentage:
+
+| Scope | Go if used < | Typical use |
+|-------|-------------|-------------|
+| `micro` | 90% | Small single-file fix |
+| `module` | 75% | Multi-file refactoring |
+| `layer` | TBD | Cross-cutting changes |
+| `full` | TBD | Full architecture review |
+
 ## Customizing Prompts
 
 Edit the templates in `.review-loop/prompts/active/` (or `prompts/active/` in the source repo).

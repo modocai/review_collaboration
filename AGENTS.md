@@ -5,6 +5,7 @@ Every PR must pass the review loop (`review-loop.sh --dry-run`) before merging. 
 ## Branch Rules
 
 Always commit and push before ending work on any branch other than develop.
+Don't commit into `main` or `develop` branch. branch → PR → Review process should be done before merge.
 
 ## Commit Messages
 
