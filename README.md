@@ -265,8 +265,8 @@ Go/no-go decision based on current usage percentage:
 |-------|-------------|-------------|
 | `micro` | 90% | Small single-file fix |
 | `module` | 75% | Multi-file refactoring |
-| `layer` | 50% | Cross-cutting changes |
-| `full` | 30% | Full architecture review |
+| `layer` | TBD | Cross-cutting changes |
+| `full` | TBD | Full architecture review |
 
 ## Customizing Prompts
 

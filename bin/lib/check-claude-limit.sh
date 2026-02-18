@@ -172,8 +172,10 @@ _claude_budget_sufficient() {
   case "$_scope" in
     micro)  _threshold=90 ;;
     module) _threshold=75 ;;
-    layer)  _threshold=50 ;;
-    full)   _threshold=30 ;;
+    layer|full)
+      echo "Warning: no established threshold for '$_scope' — skipping budget check" >&2
+      return 0
+      ;;
     *)
       echo "Error: unknown scope '$_scope'. Use: micro, module, layer, full" >&2
       return 1
@@ -224,11 +226,11 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   fi
   echo ""
   echo "Scope thresholds (go if used% < threshold):"
-  echo "  micro:  <90%   module: <75%   layer: <50%   full: <30%"
+  echo "  micro:  <90%   module: <75%   layer: TBD    full: TBD"
   echo ""
 
   # Show go/no-go for each scope (reuse _pct to avoid redundant API calls)
-  _thresholds="micro:90 module:75 layer:50 full:30"
+  _thresholds="micro:90 module:75"
   for _entry in $_thresholds; do
     _s="${_entry%%:*}"
     _thr="${_entry##*:}"
@@ -238,4 +240,6 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
       printf '  %-8s NO-GO\n' "$_s:"
     fi
   done
+  printf '  %-8s (no threshold set)\n' "layer:"
+  printf '  %-8s (no threshold set)\n' "full:"
 fi
