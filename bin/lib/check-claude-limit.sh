@@ -115,20 +115,27 @@ _claude_limit_local() {
     _cutoff=$(date -u -d '5 hours ago' +%Y-%m-%dT%H:%M:%SZ)
   fi
 
-  # Sum tokens from assistant messages within the 5-hour window
+  # Sum tokens from assistant messages within the 5-hour window.
+  # Deduplicate by message.id (each API response emits multiple JSONL lines
+  # for each content block; usage values are repeated/incremental, so we
+  # take only the last entry per message.id to avoid overcounting).
   _total_tokens=$(printf '%s\n' "$_jsonl_files" | while IFS= read -r _f; do
     [[ -f "$_f" ]] || continue
     jq -r --arg cutoff "$_cutoff" '
       select(.type == "assistant")
       | select(.timestamp >= $cutoff)
-      | .message.usage
-      | select(. != null)
-      | (.input_tokens // 0)
+      | select(.message.usage != null)
+      | { id: .message.id, usage: .message.usage }
+    ' "$_f" 2>/dev/null || true
+  done | jq -s '
+    group_by(.id)
+    | map(last.usage)
+    | map((.input_tokens // 0)
         + (.output_tokens // 0)
         + (.cache_creation_input_tokens // 0)
-        + (.cache_read_input_tokens // 0)
-    ' "$_f" 2>/dev/null
-  done | jq -s 'add // 0')
+        + (.cache_read_input_tokens // 0))
+    | add // 0
+  ')
 
   [[ -n "$_total_tokens" ]] || _total_tokens=0
 
