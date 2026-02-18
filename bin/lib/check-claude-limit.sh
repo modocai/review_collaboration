@@ -59,7 +59,7 @@ _claude_limit_oauth() {
   [[ -n "$_token" ]] || return 1
 
   _resp=$(curl -s --max-time 10 \
-    "https://api.anthropic.com/oauth/usage" \
+    "https://api.anthropic.com/api/oauth/usage" \
     -H "Authorization: Bearer $_token" \
     -H "anthropic-beta: oauth-2025-04-20" 2>/dev/null) || return 1
   [[ -n "$_resp" ]] || return 1
