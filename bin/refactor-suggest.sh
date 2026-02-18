@@ -10,7 +10,7 @@ source "$SCRIPT_DIR/lib/common.sh"
 # ── Defaults ──────────────────────────────────────────────────────────
 SCOPE="micro"
 TARGET_BRANCH="develop"
-MAX_LOOP=""
+MAX_LOOP="1"
 MAX_SUBLOOP=4
 DRY_RUN=false
 AUTO_APPROVE=false
@@ -60,7 +60,7 @@ Usage: refactor-suggest.sh [OPTIONS]
 Options:
   --scope <scope>          Refactoring scope: micro|module|layer|full (default: micro)
   -t, --target <branch>    Target branch to base from (default: develop)
-  -n, --max-loop <N>       Maximum analysis-fix iterations (required)
+  -n, --max-loop <N>       Maximum analysis-fix iterations (default: 1)
   --max-subloop <N>        Maximum self-review sub-iterations per fix (default: 4)
   --no-self-review         Disable self-review (equivalent to --max-subloop 0)
   --dry-run                Run analysis only, do not apply fixes
@@ -122,12 +122,6 @@ while [[ $# -gt 0 ]]; do
 done
 
 # ── Validation ────────────────────────────────────────────────────────
-if [[ -z "$MAX_LOOP" ]]; then
-  echo "Error: -n / --max-loop is required."
-  echo ""
-  usage 1
-fi
-
 if ! [[ "$MAX_LOOP" =~ ^[1-9][0-9]*$ ]]; then
   echo "Error: --max-loop must be a positive integer, got '$MAX_LOOP'."
   exit 1
