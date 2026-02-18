@@ -43,7 +43,7 @@ _claude_limit_oauth() {
   command -v curl &>/dev/null || return 1
   command -v security &>/dev/null || return 1
 
-  local _creds _token _resp _pct _resets_at
+  local _creds _token _resp _pct
 
   _creds=$(security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null) || return 1
   [[ -n "$_creds" ]] || return 1
@@ -61,18 +61,16 @@ _claude_limit_oauth() {
   _pct=$(printf '%s' "$_resp" | jq -r '.five_hour.utilization // empty' 2>/dev/null)
   [[ -n "$_pct" ]] || return 1
 
-  _resets_at=$(printf '%s' "$_resp" | jq -r '.five_hour.resets_at // empty' 2>/dev/null)
-
   local _tier
   _tier=$(_claude_limit_detect_tier)
 
-  printf '%s' "$_resp" | jq -c --arg tier "$_tier" --arg resets "$_resets_at" '{
+  printf '%s' "$_resp" | jq -c --arg tier "$_tier" '{
     five_hour_used_pct: (.five_hour.utilization | round),
     seven_day_used_pct: (if .seven_day then (.seven_day.utilization | round) else null end),
     tokens_used: 0,
     mode: "oauth",
     tier: $tier,
-    resets_at: $resets,
+    resets_at: (.five_hour.resets_at // null),
     seven_day_resets_at: (.seven_day.resets_at // null),
     estimated: false
   }'
