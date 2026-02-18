@@ -36,7 +36,7 @@ _claude_limit_detect_tier() {
 
 # ── Internal: OAuth-based usage query ────────────────────────────────
 # Reads credentials from macOS Keychain, calls Anthropic OAuth endpoint.
-# stdout: JSON with five_hour_used_pct, tokens_used (0 for oauth), mode, tier, estimated
+# stdout: JSON with five_hour_used_pct, seven_day_used_pct, tokens_used (0 for oauth), mode, tier, estimated
 # Returns 1 on any failure (missing tools, bad creds, API error).
 _claude_limit_oauth() {
   # Require both curl and security (macOS Keychain CLI)
@@ -68,10 +68,12 @@ _claude_limit_oauth() {
 
   printf '%s' "$_resp" | jq -c --arg tier "$_tier" --arg resets "$_resets_at" '{
     five_hour_used_pct: (.five_hour.utilization | round),
+    seven_day_used_pct: (if .seven_day then (.seven_day.utilization | round) else null end),
     tokens_used: 0,
     mode: "oauth",
     tier: $tier,
     resets_at: $resets,
+    seven_day_resets_at: (.seven_day.resets_at // null),
     estimated: false
   }'
 }
@@ -101,7 +103,7 @@ _claude_limit_local() {
   _jsonl_files=$(find "$HOME/.claude/projects/" -name '*.jsonl' -mmin -300 2>/dev/null) || true
 
   if [[ -z "$_jsonl_files" ]]; then
-    printf '{"five_hour_used_pct":0,"tokens_used":0,"mode":"local","tier":"%s","resets_at":null,"estimated":true}' "$_tier"
+    printf '{"five_hour_used_pct":0,"seven_day_used_pct":null,"tokens_used":0,"mode":"local","tier":"%s","resets_at":null,"seven_day_resets_at":null,"estimated":true}' "$_tier"
     return 0
   fi
 
@@ -144,10 +146,12 @@ _claude_limit_local() {
     --argjson tokens "$_total_tokens" \
     --arg tier "$_tier" '{
     five_hour_used_pct: $pct,
+    seven_day_used_pct: null,
     tokens_used: $tokens,
     mode: "local",
     tier: $tier,
     resets_at: null,
+    seven_day_resets_at: null,
     estimated: true
   }'
 }
@@ -209,17 +213,29 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   _estimated=$(printf '%s' "$_json" | jq -r '.estimated')
   _tokens=$(printf '%s' "$_json" | jq -r '.tokens_used')
   _resets=$(printf '%s' "$_json" | jq -r '.resets_at // "n/a"')
+  _weekly_pct=$(printf '%s' "$_json" | jq -r '.seven_day_used_pct | tostring')
+  _weekly_resets=$(printf '%s' "$_json" | jq -r '.seven_day_resets_at // "n/a"')
 
   echo "Claude Code Token Budget"
   echo "========================"
   echo "  Mode:       $_mode"
   echo "  Tier:       $_tier"
-  echo "  Used:       ${_pct}%"
+  if [[ "$_resets" != "n/a" ]] && [[ "$_resets" != "null" ]]; then
+    echo "  5h used:    ${_pct}%    (resets $_resets)"
+  else
+    echo "  5h used:    ${_pct}%"
+  fi
+  if [[ "$_weekly_pct" != "null" ]]; then
+    if [[ "$_weekly_resets" != "n/a" ]] && [[ "$_weekly_resets" != "null" ]]; then
+      echo "  7d used:    ${_weekly_pct}%    (resets $_weekly_resets)"
+    else
+      echo "  7d used:    ${_weekly_pct}%"
+    fi
+  else
+    echo "  7d used:    n/a   (local mode)"
+  fi
   if [[ "$_mode" == "local" ]]; then
     echo "  Tokens:     $_tokens (estimated)"
-  fi
-  if [[ "$_resets" != "n/a" ]] && [[ "$_resets" != "null" ]]; then
-    echo "  Resets at:  $_resets"
   fi
   if [[ "$_estimated" == "true" ]]; then
     echo "  (!) Local estimation — actual usage may differ"

@@ -252,8 +252,8 @@ The checker tries two methods in order:
 
 | Mode | Data source | Accuracy |
 |------|-------------|----------|
-| **OAuth** (primary) | macOS Keychain → `security find-generic-password` → Anthropic OAuth API (`/oauth/usage`) | Exact — returns `five_hour.utilization` directly from Anthropic |
-| **Local** (fallback) | `~/.claude/projects/**/*.jsonl` session files — sums `input_tokens + output_tokens + cache_creation_input_tokens + cache_read_input_tokens` from `message.usage` of assistant messages in the last 5 hours | Estimated — actual server-side limits are opaque |
+| **OAuth** (primary) | macOS Keychain → `security find-generic-password` → Anthropic OAuth API (`/oauth/usage`) | Exact — returns `five_hour.utilization` and `seven_day.utilization` directly from Anthropic |
+| **Local** (fallback) | `~/.claude/projects/**/*.jsonl` session files — sums `input_tokens + output_tokens + cache_creation_input_tokens + cache_read_input_tokens` from `message.usage` of assistant messages in the last 5 hours | Estimated — actual server-side limits are opaque; weekly usage (`seven_day_used_pct`) is unavailable (`null`) |
 
 **Tier detection** reads `rateLimitTier` from `~/.claude/telemetry/*.json` (field `event_data.user_attributes`). Mapping: `default` → pro, `default_claude_max_5x` → max5, `default_claude_max_20x` → max20.
 
