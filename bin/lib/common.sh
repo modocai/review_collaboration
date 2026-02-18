@@ -47,7 +47,7 @@ _git_all_dirty_nul() {
 # ── Allowlisted Dirty-File Stash ──────────────────────────────────────
 # Stash specific allowlisted files if they are dirty/untracked.
 # Usage: _stash_allowlisted FILE...
-# Returns 0 if files were stashed, 1 if nothing to stash.
+# Returns 0 if files were stashed, 1 if nothing to stash, 2 on stash error.
 _stash_allowlisted() {
   local _files=() _f _dirty
   # Collect all dirty/untracked files once (avoids per-file git calls)
@@ -58,8 +58,10 @@ _stash_allowlisted() {
     fi
   done
   if [[ ${#_files[@]} -gt 0 ]]; then
-    git stash push --quiet --include-untracked -- "${_files[@]}" 2>/dev/null
-    return $?
+    if ! git stash push --quiet --include-untracked -- "${_files[@]}" 2>/dev/null; then
+      return 2
+    fi
+    return 0
   fi
   return 1
 }

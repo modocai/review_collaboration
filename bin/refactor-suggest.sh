@@ -210,10 +210,13 @@ REFACTOR_BRANCH="refactor/${SCOPE}-${TIMESTAMP}"
 
 if [[ "$DRY_RUN" == false ]]; then
   # Stash allowlisted files that may conflict with branch switch
-  _needs_stash=false
-  if _stash_allowlisted .gitignore .refactorsuggestrc .reviewlooprc; then
-    _needs_stash=true
+  _stash_rc=0
+  _stash_allowlisted .gitignore .refactorsuggestrc .reviewlooprc || _stash_rc=$?
+  if [[ "$_stash_rc" -eq 2 ]]; then
+    echo "Error: failed to stash allowlisted files" >&2
+    exit 1
   fi
+  _needs_stash=$([[ "$_stash_rc" -eq 0 ]] && echo true || echo false)
 
   echo "Creating branch: $REFACTOR_BRANCH (from $TARGET_BRANCH)"
   if ! git checkout -b "$REFACTOR_BRANCH" "$TARGET_BRANCH"; then
@@ -360,10 +363,14 @@ for (( i=1; i<=MAX_LOOP; i++ )); do
   fi
 
   # ── Stash allowed dirty files ───────────────────────────────────
-  _allowed_dirty_stashed=false
-  if _stash_allowlisted .gitignore .refactorsuggestrc .reviewlooprc; then
-    _allowed_dirty_stashed=true
+  _stash_rc=0
+  _stash_allowlisted .gitignore .refactorsuggestrc .reviewlooprc || _stash_rc=$?
+  if [[ "$_stash_rc" -eq 2 ]]; then
+    echo "Error: failed to stash allowlisted files" >&2
+    FINAL_STATUS="stash_error"
+    break
   fi
+  _allowed_dirty_stashed=$([[ "$_stash_rc" -eq 0 ]] && echo true || echo false)
 
   # ── Snapshot pre-fix working tree state ─────────────────────────
   PRE_FIX_STATE=$(_snapshot_worktree)
