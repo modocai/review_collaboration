@@ -13,19 +13,26 @@ _CHECK_CLAUDE_LIMIT_SH_LOADED=1
 
 # ── Internal: Detect subscription tier ───────────────────────────────
 # Reads rateLimitTier from Claude Code telemetry files.
+# Picks the most recent record by client_timestamp to handle plan changes.
 # stdout: tier slug (pro, max5, max20)
 _claude_limit_detect_tier() {
   local _tier_raw="" _f
-  for _f in "$HOME"/.claude/telemetry/*.json; do
-    [[ -e "$_f" ]] || continue
-    # user_attributes may be a JSON string (needs double-parse) or an object
-    _tier_raw=$(jq -r '
-      .event_data.user_attributes // empty
-      | if type == "string" then fromjson else . end
-      | .rateLimitTier // empty
-    ' "$_f" 2>/dev/null | grep -v '^$' | head -1)
-    [[ -n "$_tier_raw" ]] && break
-  done
+  # Collect all (timestamp, tier) pairs across telemetry files,
+  # then pick the tier from the most recent event.
+  _tier_raw=$(
+    for _f in "$HOME"/.claude/telemetry/*.json; do
+      [[ -e "$_f" ]] || continue
+      # user_attributes may be a JSON string (needs double-parse) or an object
+      jq -r '
+        .event_data
+        | (.user_attributes // empty
+           | if type == "string" then fromjson else . end
+           | .rateLimitTier // empty) as $tier
+        | select($tier != "")
+        | [.client_timestamp, $tier] | @tsv
+      ' "$_f" 2>/dev/null
+    done | sort -t$'\t' -k1,1r | head -1 | cut -f2
+  )
 
   case "$_tier_raw" in
     default_claude_max_20x) printf 'max20' ;;
