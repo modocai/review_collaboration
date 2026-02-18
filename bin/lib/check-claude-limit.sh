@@ -164,6 +164,7 @@ _check_claude_token_budget() {
 
 # ── Public: Go/no-go decision ────────────────────────────────────────
 # $1 = scope: micro, module, layer, full
+# $2 = (optional) pre-fetched JSON from _check_claude_token_budget
 # return 0 = go, return 1 = no-go
 _claude_budget_sufficient() {
   local _scope="${1:-module}" _threshold _budget_json _pct
@@ -179,7 +180,7 @@ _claude_budget_sufficient() {
       ;;
   esac
 
-  _budget_json=$(_check_claude_token_budget)
+  _budget_json="${2:-$(_check_claude_token_budget)}"
   _pct=$(printf '%s' "$_budget_json" | jq -r '.five_hour_used_pct')
 
   if [[ "$_pct" -lt "$_threshold" ]]; then
