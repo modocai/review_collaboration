@@ -30,7 +30,7 @@ _claude_limit_detect_tier() {
            | .rateLimitTier // empty) as $tier
         | select($tier != "")
         | [(.client_timestamp // .timestamp // ""), $tier] | @tsv
-      ' "$_f" 2>/dev/null
+      ' "$_f" 2>/dev/null || true
     done | sort -t$'\t' -k1,1r | head -1 | cut -f2
   )
 
@@ -116,10 +116,10 @@ _claude_limit_local() {
   local _cutoff
   if date -v-5H +%s &>/dev/null; then
     # macOS/BSD date
-    _cutoff=$(date -u -v-5H +%Y-%m-%dT%H:%M:%SZ)
+    _cutoff=$(date -u -v-5H +%Y-%m-%dT%H:%M:%S.000Z)
   else
     # GNU date
-    _cutoff=$(date -u -d '5 hours ago' +%Y-%m-%dT%H:%M:%SZ)
+    _cutoff=$(date -u -d '5 hours ago' +%Y-%m-%dT%H:%M:%S.000Z)
   fi
 
   # Sum tokens from assistant messages within the 5-hour window.
