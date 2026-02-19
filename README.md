@@ -321,8 +321,10 @@ The loop terminates when any of these occur:
 # Quick — just nuke the directory
 rm -rf .review-loop
 
-# Thorough — also cleans up .gitignore entries
-./uninstall.sh /path/to/your-project
+# Thorough — also cleans up .gitignore entries (requires source repo)
+git clone --depth 1 https://github.com/modocai/mr-overkill.git /tmp/mr-overkill \
+  && /tmp/mr-overkill/uninstall.sh /path/to/your-project \
+  && rm -rf /tmp/mr-overkill
 ```
 
 ## Contributing
