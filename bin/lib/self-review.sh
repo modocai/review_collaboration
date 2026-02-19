@@ -270,8 +270,10 @@ EOF
   fi
 
   # Log directory
+  _AUTO_LOG_DIR=false
   if [[ -z "$_LOG_DIR" ]]; then
     _LOG_DIR=$(mktemp -d)
+    _AUTO_LOG_DIR=true
     echo "Using temporary log directory: $_LOG_DIR"
   else
     mkdir -p "$_LOG_DIR"
@@ -281,6 +283,9 @@ EOF
   PRE_FIX_STATE=$(mktemp)
   _standalone_cleanup() {
     rm -f "$PRE_FIX_STATE"
+    if [[ "$_AUTO_LOG_DIR" == true ]] && [[ -d "$_LOG_DIR" ]]; then
+      rm -rf "$_LOG_DIR"
+    fi
   }
   trap _standalone_cleanup EXIT
 
