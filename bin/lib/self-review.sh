@@ -136,7 +136,11 @@ _self_review_subloop() {
     # Apply JSON hook if configured (e.g. inject refactoring_plan)
     _refix_input_json="$_self_review_json"
     if [[ -n "$_refix_json_hook" ]]; then
-      _refix_input_json=$(printf '%s' "$_self_review_json" | "$_refix_json_hook" "$_original_review_json")
+      if ! declare -F "$_refix_json_hook" >/dev/null 2>&1; then
+        echo "  Warning: SR_REFIX_JSON_HOOK='$_refix_json_hook' is not a defined function — skipping hook." >&2
+      else
+        _refix_input_json=$(printf '%s' "$_self_review_json" | "$_refix_json_hook" "$_original_review_json")
+      fi
     fi
 
     if ! _claude_two_step_fix "$_refix_input_json" "$_refix_opinion_file" "$_refix_file" "re-fix" \
@@ -266,8 +270,10 @@ EOF
   fi
 
   # Log directory
+  _AUTO_LOG_DIR=false
   if [[ -z "$_LOG_DIR" ]]; then
     _LOG_DIR=$(mktemp -d)
+    _AUTO_LOG_DIR=true
     echo "Using temporary log directory: $_LOG_DIR"
   else
     mkdir -p "$_LOG_DIR"
@@ -275,7 +281,13 @@ EOF
 
   # Snapshot pre-fix state
   PRE_FIX_STATE=$(_snapshot_worktree)
-  trap 'rm -f "$PRE_FIX_STATE"' EXIT
+  _standalone_cleanup() {
+    rm -f "$PRE_FIX_STATE"
+    if [[ "$_AUTO_LOG_DIR" == true ]] && [[ -d "$_LOG_DIR" ]]; then
+      rm -rf "$_LOG_DIR"
+    fi
+  }
+  trap _standalone_cleanup EXIT
 
   # Build synthetic REVIEW_JSON
   _REVIEW_JSON='{"findings":[],"overall_correctness":"not reviewed"}'
