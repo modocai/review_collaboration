@@ -16,6 +16,7 @@ MAX_SUBLOOP=4
 DRY_RUN=false
 AUTO_APPROVE=false
 CREATE_PR=false
+RESUME=false
 
 # ── Load .refactorsuggestrc (if present) ──────────────────────────────
 REFACTORSUGGESTRC=".refactorsuggestrc"
@@ -68,6 +69,7 @@ Options:
   --no-dry-run             Force fixes even if .refactorsuggestrc sets DRY_RUN=true
   --auto-approve           Skip interactive confirmation for layer/full scope
   --create-pr              Create a draft PR after completing all iterations
+  --resume                 Resume from a previously interrupted run (reuses existing logs)
   -V, --version            Show version
   -h, --help               Show this help message
 
@@ -116,6 +118,7 @@ while [[ $# -gt 0 ]]; do
     --no-dry-run)      DRY_RUN=false; shift ;;
     --auto-approve)    AUTO_APPROVE=true; shift ;;
     --create-pr)       CREATE_PR=true; shift ;;
+    --resume)          RESUME=true; shift ;;
     -V|--version) echo "refactor-suggest v$VERSION"; exit 0 ;;
     -h|--help)    usage ;;
     *)            echo "Error: unknown option '$1'"; usage 1 ;;
@@ -165,7 +168,7 @@ if ! git rev-parse --verify "$TARGET_BRANCH" &>/dev/null; then
 fi
 
 # Clean working tree check (only when applying fixes)
-if [[ "$DRY_RUN" == false ]]; then
+if [[ "$DRY_RUN" == false ]] && [[ "$RESUME" == false ]]; then
   _dirty=$(git diff --name-only | grep -v -E '^(\.gitignore|\.refactorsuggestrc|\.reviewlooprc)$' || true)
   _untracked=$(git ls-files --others --exclude-standard | grep -v -E '^(\.gitignore|\.refactorsuggestrc|\.reviewlooprc)$' || true)
   _staged=$(git diff --cached --name-only | grep -v -E '^(\.gitignore|\.refactorsuggestrc|\.reviewlooprc)$' || true)
@@ -209,7 +212,7 @@ fi
 TIMESTAMP=$(date +%Y%m%d-%H%M%S)
 REFACTOR_BRANCH="refactor/${SCOPE}-${TIMESTAMP}"
 
-if [[ "$DRY_RUN" == false ]]; then
+if [[ "$DRY_RUN" == false ]] && [[ "$RESUME" == false ]]; then
   # Stash allowlisted files that may conflict with branch switch
   _stash_rc=0
   _stash_allowlisted .gitignore .refactorsuggestrc .reviewlooprc || _stash_rc=$?
@@ -235,8 +238,10 @@ if [[ "$DRY_RUN" == false ]]; then
   fi
   unset _needs_stash
   CURRENT_BRANCH="$REFACTOR_BRANCH"
-else
+elif [[ "$DRY_RUN" == true ]]; then
   echo "Dry-run mode — staying on $CURRENT_BRANCH"
+elif [[ "$RESUME" == true ]]; then
+  echo "Resume mode — staying on $CURRENT_BRANCH"
 fi
 
 export CURRENT_BRANCH TARGET_BRANCH
@@ -244,9 +249,11 @@ export CURRENT_BRANCH TARGET_BRANCH
 # ── Log directory + source file list ──────────────────────────────────
 LOG_DIR="$SCRIPT_DIR/../logs/refactor"
 mkdir -p "$LOG_DIR"
-rm -f "$LOG_DIR"/review-*.json "$LOG_DIR"/fix-*.md "$LOG_DIR"/opinion-*.md \
-  "$LOG_DIR"/self-review-*.json "$LOG_DIR"/refix-*.md "$LOG_DIR"/refix-opinion-*.md \
-  "$LOG_DIR"/summary.md "$LOG_DIR"/source-files.txt
+if [[ "$RESUME" == false ]]; then
+  rm -f "$LOG_DIR"/review-*.json "$LOG_DIR"/fix-*.md "$LOG_DIR"/opinion-*.md \
+    "$LOG_DIR"/self-review-*.json "$LOG_DIR"/refix-*.md "$LOG_DIR"/refix-opinion-*.md \
+    "$LOG_DIR"/summary.md "$LOG_DIR"/source-files.txt
+fi
 
 # Collect source files (respects .gitignore)
 SOURCE_FILES_PATH="$LOG_DIR/source-files.txt"
@@ -277,6 +284,43 @@ _cleanup() {
 }
 trap _cleanup EXIT
 
+# ── Resume detection ──────────────────────────────────────────────────
+_RESUME_FROM=1
+_REUSE_REVIEW=false
+
+if [[ "$RESUME" == true ]]; then
+  _resume_json=$(_resume_detect_state "$LOG_DIR" "refactor(ai-$SCOPE): apply iteration")
+  _resume_status=$(printf '%s' "$_resume_json" | jq -r '.status')
+  _RESUME_FROM=$(printf '%s' "$_resume_json" | jq -r '.resume_from')
+  _REUSE_REVIEW=$(printf '%s' "$_resume_json" | jq -r '.reuse_review')
+
+  case "$_resume_status" in
+    completed)
+      _prev=$(printf '%s' "$_resume_json" | jq -r '.prev_status')
+      echo "Previous run completed with status: $_prev. Nothing to resume."
+      FINAL_STATUS="$_prev"
+      SUMMARY_FILE=$(_generate_summary "Refactor Suggest Summary" "- **Scope**: $SCOPE")
+      echo ""
+      echo "═══════════════════════════════════════════════════════"
+      echo " Done. Status: $FINAL_STATUS"
+      echo " Summary: $SUMMARY_FILE"
+      echo "═══════════════════════════════════════════════════════"
+      exit 0
+      ;;
+    no_logs)
+      echo "Error: no previous logs found in $LOG_DIR. Nothing to resume."
+      exit 1
+      ;;
+    resumable)
+      echo "Resuming from iteration $_RESUME_FROM (reuse_review=$_REUSE_REVIEW)"
+      if [[ "$_REUSE_REVIEW" == true ]]; then
+        _resume_reset_working_tree
+        echo "  Working tree reset to last committed state."
+      fi
+      ;;
+  esac
+fi
+
 # ── Loop ──────────────────────────────────────────────────────────────
 FINAL_STATUS="max_iterations_reached"
 
@@ -287,23 +331,35 @@ for (( i=1; i<=MAX_LOOP; i++ )); do
 
   export ITERATION="$i"
 
+  # ── Resume: skip completed iterations ──────────────────────────
+  if [[ "$i" -lt "$_RESUME_FROM" ]]; then
+    echo "  [resume] Skipping iteration $i (already completed)."
+    continue
+  fi
+
   # Refresh source file list (new files may have been committed in previous iterations)
   git ls-files > "$SOURCE_FILES_PATH"
 
   # ── a. Codex analysis ────────────────────────────────────────────
-  echo "[$(date +%H:%M:%S)] Running Codex refactoring analysis (scope: $SCOPE)..."
   REVIEW_FILE="$LOG_DIR/review-${i}.json"
-  rm -f "$REVIEW_FILE"
 
-  REVIEW_PROMPT=$(envsubst '$CURRENT_BRANCH $TARGET_BRANCH $ITERATION $SOURCE_FILES_PATH' < "$PROMPTS_DIR/$CODEX_PROMPT_FILE")
+  if [[ "$RESUME" == true ]] && [[ "$_REUSE_REVIEW" == true ]] \
+     && [[ "$i" -eq "$_RESUME_FROM" ]] && [[ -f "$REVIEW_FILE" ]]; then
+    echo "  [resume] Reusing saved review: $REVIEW_FILE"
+  else
+    rm -f "$REVIEW_FILE"
+    echo "[$(date +%H:%M:%S)] Running Codex refactoring analysis (scope: $SCOPE)..."
 
-  if ! codex exec \
-    --sandbox read-only \
-    -o "$REVIEW_FILE" \
-    "$REVIEW_PROMPT" 2>&1; then
-    echo "Error: Codex analysis failed (iteration $i)."
-    FINAL_STATUS="codex_error"
-    break
+    REVIEW_PROMPT=$(envsubst '$CURRENT_BRANCH $TARGET_BRANCH $ITERATION $SOURCE_FILES_PATH' < "$PROMPTS_DIR/$CODEX_PROMPT_FILE")
+
+    if ! codex exec \
+      --sandbox read-only \
+      -o "$REVIEW_FILE" \
+      "$REVIEW_PROMPT" 2>&1; then
+      echo "Error: Codex analysis failed (iteration $i)."
+      FINAL_STATUS="codex_error"
+      break
+    fi
   fi
 
   # ── b. Extract JSON from response ────────────────────────────────

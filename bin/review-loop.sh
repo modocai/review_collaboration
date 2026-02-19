@@ -14,6 +14,7 @@ MAX_LOOP=""
 MAX_SUBLOOP=4
 DRY_RUN=false
 AUTO_COMMIT=true
+RESUME=false
 
 # ── Load .reviewlooprc (if present) ──────────────────────────────────
 # Project-level config file can override defaults above.
@@ -66,6 +67,7 @@ Options:
   --no-dry-run             Force fixes even if .reviewlooprc sets DRY_RUN=true
   --no-auto-commit         Fix but do not commit/push (single iteration)
   --auto-commit            Force commit/push even if .reviewlooprc sets AUTO_COMMIT=false
+  --resume                 Resume from a previously interrupted run (reuses existing logs)
   -V, --version            Show version
   -h, --help               Show this help message
 
@@ -103,6 +105,7 @@ while [[ $# -gt 0 ]]; do
     --no-dry-run)      DRY_RUN=false; shift ;;
     --no-auto-commit)  AUTO_COMMIT=false; shift ;;
     --auto-commit)     AUTO_COMMIT=true; shift ;;
+    --resume)          RESUME=true; shift ;;
     -V|--version) echo "review-loop v$VERSION"; exit 0 ;;
     -h|--help)    usage ;;
     *)            echo "Error: unknown option '$1'"; usage 1 ;;
@@ -158,7 +161,7 @@ CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 _dirty_non_gitignore=$(git diff --name-only | grep -v -E '^(\.gitignore|\.reviewlooprc)$' || true)
 _untracked_non_gitignore=$(git ls-files --others --exclude-standard | grep -v -E '^(\.gitignore|\.reviewlooprc)$' || true)
 _staged_non_gitignore=$(git diff --cached --name-only | grep -v -E '^(\.gitignore|\.reviewlooprc)$' || true)
-if [[ "$DRY_RUN" == false ]]; then
+if [[ "$DRY_RUN" == false ]] && [[ "$RESUME" == false ]]; then
   if [[ -n "$_dirty_non_gitignore" ]] || [[ -n "$_staged_non_gitignore" ]] || [[ -n "$_untracked_non_gitignore" ]]; then
     echo "Error: working tree is not clean. Commit or stash your changes before running review-loop."
     echo ""
@@ -173,7 +176,9 @@ unset _dirty_non_gitignore _staged_non_gitignore _untracked_non_gitignore
 LOG_DIR="$SCRIPT_DIR/../logs"
 mkdir -p "$LOG_DIR"
 # Remove stale logs from previous runs so the summary only reflects this execution
-rm -f "$LOG_DIR"/review-*.json "$LOG_DIR"/fix-*.md "$LOG_DIR"/opinion-*.md "$LOG_DIR"/self-review-*.json "$LOG_DIR"/refix-*.md "$LOG_DIR"/refix-opinion-*.md "$LOG_DIR"/summary.md
+if [[ "$RESUME" == false ]]; then
+  rm -f "$LOG_DIR"/review-*.json "$LOG_DIR"/fix-*.md "$LOG_DIR"/opinion-*.md "$LOG_DIR"/self-review-*.json "$LOG_DIR"/refix-*.md "$LOG_DIR"/refix-opinion-*.md "$LOG_DIR"/summary.md
+fi
 
 export CURRENT_BRANCH TARGET_BRANCH
 
@@ -219,6 +224,43 @@ _cleanup() {
 }
 trap _cleanup EXIT
 
+# ── Resume detection ──────────────────────────────────────────────────
+_RESUME_FROM=1
+_REUSE_REVIEW=false
+
+if [[ "$RESUME" == true ]]; then
+  _resume_json=$(_resume_detect_state "$LOG_DIR" "fix(ai-review): apply iteration")
+  _resume_status=$(printf '%s' "$_resume_json" | jq -r '.status')
+  _RESUME_FROM=$(printf '%s' "$_resume_json" | jq -r '.resume_from')
+  _REUSE_REVIEW=$(printf '%s' "$_resume_json" | jq -r '.reuse_review')
+
+  case "$_resume_status" in
+    completed)
+      _prev=$(printf '%s' "$_resume_json" | jq -r '.prev_status')
+      echo "Previous run completed with status: $_prev. Nothing to resume."
+      FINAL_STATUS="$_prev"
+      SUMMARY_FILE=$(_generate_summary "Review Loop Summary")
+      echo ""
+      echo "═══════════════════════════════════════════════════════"
+      echo " Done. Status: $FINAL_STATUS"
+      echo " Summary: $SUMMARY_FILE"
+      echo "═══════════════════════════════════════════════════════"
+      exit 0
+      ;;
+    no_logs)
+      echo "Error: no previous logs found in $LOG_DIR. Nothing to resume."
+      exit 1
+      ;;
+    resumable)
+      echo "Resuming from iteration $_RESUME_FROM (reuse_review=$_REUSE_REVIEW)"
+      if [[ "$_REUSE_REVIEW" == true ]]; then
+        _resume_reset_working_tree
+        echo "  Working tree reset to last committed state."
+      fi
+      ;;
+  esac
+fi
+
 # ── Loop ──────────────────────────────────────────────────────────────
 FINAL_STATUS="max_iterations_reached"
 
@@ -229,6 +271,12 @@ for (( i=1; i<=MAX_LOOP; i++ )); do
 
   export ITERATION="$i"
 
+  # ── Resume: skip completed iterations ──────────────────────────
+  if [[ "$i" -lt "$_RESUME_FROM" ]]; then
+    echo "  [resume] Skipping iteration $i (already completed)."
+    continue
+  fi
+
   # ── a. Check diff ───────────────────────────────────────────────
   if git diff --quiet "$TARGET_BRANCH...$CURRENT_BRANCH"; then
     echo "No diff between $TARGET_BRANCH and $CURRENT_BRANCH. Nothing to review."
@@ -237,19 +285,25 @@ for (( i=1; i<=MAX_LOOP; i++ )); do
   fi
 
   # ── c. Codex review ──────────────────────────────────────────────
-  echo "[$(date +%H:%M:%S)] Running Codex review..."
   REVIEW_FILE="$LOG_DIR/review-${i}.json"
-  rm -f "$REVIEW_FILE"
 
-  REVIEW_PROMPT=$(envsubst '$CURRENT_BRANCH $TARGET_BRANCH $ITERATION' < "$PROMPTS_DIR/codex-review.prompt.md")
+  if [[ "$RESUME" == true ]] && [[ "$_REUSE_REVIEW" == true ]] \
+     && [[ "$i" -eq "$_RESUME_FROM" ]] && [[ -f "$REVIEW_FILE" ]]; then
+    echo "  [resume] Reusing saved review: $REVIEW_FILE"
+  else
+    rm -f "$REVIEW_FILE"
+    echo "[$(date +%H:%M:%S)] Running Codex review..."
 
-  if ! codex exec \
-    --sandbox read-only \
-    -o "$REVIEW_FILE" \
-    "$REVIEW_PROMPT" 2>&1; then
-    echo "Error: Codex review failed (iteration $i). Skipping this iteration."
-    FINAL_STATUS="codex_error"
-    break
+    REVIEW_PROMPT=$(envsubst '$CURRENT_BRANCH $TARGET_BRANCH $ITERATION' < "$PROMPTS_DIR/codex-review.prompt.md")
+
+    if ! codex exec \
+      --sandbox read-only \
+      -o "$REVIEW_FILE" \
+      "$REVIEW_PROMPT" 2>&1; then
+      echo "Error: Codex review failed (iteration $i). Skipping this iteration."
+      FINAL_STATUS="codex_error"
+      break
+    fi
   fi
 
   # ── d. Extract JSON from response ────────────────────────────────

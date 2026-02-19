@@ -234,6 +234,60 @@ _commit_and_push() {
   return 0
 }
 
+# ── Resume Helpers ─────────────────────────────────────────────────
+# Detect resume state from log directory and git history.
+# $1 = log_dir, $2 = commit_pattern (e.g. "fix(ai-review): apply iteration")
+# stdout: JSON { "status": "...", "resume_from": N, "reuse_review": bool }
+# status: "completed" | "resumable" | "no_logs"
+_resume_detect_state() {
+  local _log_dir="$1" _commit_pattern="$2"
+
+  # 1) summary.md check
+  if [[ ! -f "$_log_dir/summary.md" ]]; then
+    printf '{"status":"no_logs","resume_from":1,"reuse_review":false}'
+    return 0
+  fi
+
+  # 2) Extract FINAL_STATUS
+  local _final_status
+  _final_status=$(grep -oP '(?<=\*\*Final status\*\*: ).*' "$_log_dir/summary.md" || echo "unknown")
+
+  case "$_final_status" in
+    all_clear|no_diff|dry_run|max_iterations_reached)
+      printf '{"status":"completed","resume_from":0,"reuse_review":false,"prev_status":"%s"}' "$_final_status"
+      return 0 ;;
+  esac
+
+  # 3) Find last review file to determine failed iteration
+  local _last_i=0 _f _n
+  for _f in "$_log_dir"/review-*.json; do
+    [[ -e "$_f" ]] || continue
+    _n=$(basename "$_f" | sed 's/review-//;s/.json//')
+    [[ "$_n" -gt "$_last_i" ]] && _last_i="$_n"
+  done
+
+  if [[ "$_last_i" -eq 0 ]]; then
+    printf '{"status":"resumable","resume_from":1,"reuse_review":false}'
+    return 0
+  fi
+
+  # 4) Check if commit exists for this iteration
+  if git log --oneline --grep="$_commit_pattern ${_last_i}" HEAD 2>/dev/null | grep -q .; then
+    # Commit completed → start from next iteration
+    printf '{"status":"resumable","resume_from":%d,"reuse_review":false}' $(( _last_i + 1 ))
+  else
+    # Commit missing → reuse this iteration's review JSON
+    printf '{"status":"resumable","resume_from":%d,"reuse_review":true}' "$_last_i"
+  fi
+}
+
+# Reset working tree to last committed state (clean partial edits).
+_resume_reset_working_tree() {
+  git reset --quiet HEAD 2>/dev/null || true
+  git checkout -- . 2>/dev/null || true
+  git clean -fd --quiet 2>/dev/null || true
+}
+
 # ── Summary Generation ──────────────────────────────────────────────
 # Generate summary.md from iteration logs.
 # $1 = title (e.g. "Review Loop Summary", "Refactor Suggest Summary")
