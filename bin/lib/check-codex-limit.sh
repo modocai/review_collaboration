@@ -88,7 +88,11 @@ _check_codex_token_budget() {
       _5h_resets=""
     else
       _5h_pct=$(printf '%s' "$_primary" | jq -r '.used_percent | round')
-      _5h_resets=$(_codex_limit_ts_to_iso "$_5h_resets")
+      if [[ "$_5h_resets" =~ ^[0-9]+$ ]]; then
+        _5h_resets=$(_codex_limit_ts_to_iso "$_5h_resets")
+      else
+        _5h_resets=""
+      fi
     fi
   else
     _5h_pct=0
@@ -105,7 +109,11 @@ _check_codex_token_budget() {
       _7d_resets=""
     else
       _7d_pct=$(printf '%s' "$_secondary" | jq -r '.used_percent | round')
-      _7d_resets=$(_codex_limit_ts_to_iso "$_7d_resets")
+      if [[ "$_7d_resets" =~ ^[0-9]+$ ]]; then
+        _7d_resets=$(_codex_limit_ts_to_iso "$_7d_resets")
+      else
+        _7d_resets=""
+      fi
     fi
   else
     _7d_pct=""
