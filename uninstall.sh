@@ -42,6 +42,10 @@ if [[ -d "$TARGET_DIR/.review-loop" ]]; then
     # Manifest-driven removal
     while IFS= read -r _entry; do
       [[ -n "$_entry" ]] || continue
+      # Reject path traversal
+      case "$_entry" in
+        ../*|*/../*|*/..) echo "Skipping unsafe manifest entry: $_entry" >&2; continue ;;
+      esac
       if [[ -f "$_install_dir/$_entry" ]]; then
         rm "$_install_dir/$_entry"
         echo "Removed .review-loop/$_entry"
