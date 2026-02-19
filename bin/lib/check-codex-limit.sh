@@ -20,7 +20,7 @@ _codex_limit_find_latest_token_count() {
   [[ -d "$_sessions_dir" ]] || return 1
 
   local _offset _day_dir _dir _files _f _result
-  for _offset in $(seq 0 6); do
+  for _offset in {0..6}; do
     # macOS/BSD vs GNU date
     if date -v-1d +%s &>/dev/null; then
       _day_dir=$(date -u -v-"${_offset}d" +%Y/%m/%d)
@@ -53,7 +53,7 @@ _codex_limit_find_latest_token_count() {
 # ── Internal: Convert Unix timestamp to ISO 8601 ────────────────────
 _codex_limit_ts_to_iso() {
   local _ts="$1"
-  if date -r 0 +%s &>/dev/null; then
+  if date -v-1d +%s &>/dev/null; then
     # macOS/BSD date
     date -u -r "$_ts" +%Y-%m-%dT%H:%M:%SZ
   else
@@ -82,7 +82,7 @@ _check_codex_token_budget() {
   _primary=$(printf '%s' "$_event" | jq -c '.payload.rate_limits.primary // empty' 2>/dev/null)
   if [[ -n "$_primary" ]]; then
     _5h_resets=$(printf '%s' "$_primary" | jq -r '.resets_at')
-    if [[ "$_5h_resets" != "null" ]] && [[ "$_5h_resets" -le "$_now" ]]; then
+    if [[ "$_5h_resets" != "null" ]] && [[ "$_5h_resets" =~ ^[0-9]+$ ]] && [[ "$_5h_resets" -le "$_now" ]]; then
       # Window has reset
       _5h_pct=0
       _5h_resets=""
@@ -99,7 +99,7 @@ _check_codex_token_budget() {
   _secondary=$(printf '%s' "$_event" | jq -c '.payload.rate_limits.secondary // empty' 2>/dev/null)
   if [[ -n "$_secondary" ]]; then
     _7d_resets=$(printf '%s' "$_secondary" | jq -r '.resets_at')
-    if [[ "$_7d_resets" != "null" ]] && [[ "$_7d_resets" -le "$_now" ]]; then
+    if [[ "$_7d_resets" != "null" ]] && [[ "$_7d_resets" =~ ^[0-9]+$ ]] && [[ "$_7d_resets" -le "$_now" ]]; then
       # Window has reset
       _7d_pct=0
       _7d_resets=""
