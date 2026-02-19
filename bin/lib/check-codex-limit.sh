@@ -109,18 +109,18 @@ _check_codex_token_budget() {
   _now=$(date +%s)
 
   _primary=$(printf '%s' "$_event" | jq -c '.payload.rate_limits.primary // empty' 2>/dev/null)
-  read -r _5h_pct _5h_resets <<< "$(_codex_limit_parse_window "$_primary" "$_now" "0")"
+  read -r _5h_pct _5h_resets <<< "$(_codex_limit_parse_window "$_primary" "$_now" "")"
 
   _secondary=$(printf '%s' "$_event" | jq -c '.payload.rate_limits.secondary // empty' 2>/dev/null)
   read -r _7d_pct _7d_resets <<< "$(_codex_limit_parse_window "$_secondary" "$_now" "")"
 
   jq -n -c \
-    --argjson five_pct "$_5h_pct" \
+    --arg five_pct "${_5h_pct}" \
     --arg five_resets "${_5h_resets}" \
     --arg seven_pct "${_7d_pct}" \
     --arg seven_resets "${_7d_resets}" \
     '{
-      five_hour_used_pct: $five_pct,
+      five_hour_used_pct: (if $five_pct == "" then null else ($five_pct | tonumber) end),
       seven_day_used_pct: (if $seven_pct == "" then null else ($seven_pct | tonumber) end),
       mode: "session_log",
       resets_at: (if $five_resets == "" then null else $five_resets end),
