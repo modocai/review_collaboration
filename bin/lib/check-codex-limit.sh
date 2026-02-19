@@ -72,7 +72,7 @@ _codex_limit_parse_window() {
   local _resets _pct
 
   if [[ -z "$_win" ]]; then
-    printf '%s ' "$_default_pct"
+    printf '%s\n' "$_default_pct"
     return 0
   fi
 
@@ -80,15 +80,15 @@ _codex_limit_parse_window() {
 
   # Window has expired
   if [[ "$_resets" != "null" ]] && [[ "$_resets" =~ ^[0-9]+$ ]] && [[ "$_resets" -le "$_now" ]]; then
-    printf '0 '
+    printf '0\n'
     return 0
   fi
 
   _pct=$(printf '%s' "$_win" | jq -r '.used_percent | round')
   if [[ "$_resets" =~ ^[0-9]+$ ]]; then
-    printf '%s %s' "$_pct" "$(_codex_limit_ts_to_iso "$_resets")"
+    printf '%s %s\n' "$_pct" "$(_codex_limit_ts_to_iso "$_resets")"
   else
-    printf '%s ' "$_pct"
+    printf '%s\n' "$_pct"
   fi
 }
 
@@ -109,10 +109,10 @@ _check_codex_token_budget() {
   _now=$(date +%s)
 
   _primary=$(printf '%s' "$_event" | jq -c '.payload.rate_limits.primary // empty' 2>/dev/null)
-  read -r _5h_pct _5h_resets <<< "$(_codex_limit_parse_window "$_primary" "$_now" "")"
+  read -r _5h_pct _5h_resets < <(_codex_limit_parse_window "$_primary" "$_now" "")
 
   _secondary=$(printf '%s' "$_event" | jq -c '.payload.rate_limits.secondary // empty' 2>/dev/null)
-  read -r _7d_pct _7d_resets <<< "$(_codex_limit_parse_window "$_secondary" "$_now" "")"
+  read -r _7d_pct _7d_resets < <(_codex_limit_parse_window "$_secondary" "$_now" "")
 
   jq -n -c \
     --arg five_pct "${_5h_pct}" \
