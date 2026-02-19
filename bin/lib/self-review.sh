@@ -69,6 +69,15 @@ _self_review_subloop() {
     # First iteration can use a pre-generated diff (branch diff mode)
     if [[ $_j -eq 1 ]] && [[ -n "$_initial_diff" ]] && [[ -s "$_initial_diff" ]]; then
       export DIFF_FILE="$_initial_diff"
+    elif [[ -n "$_initial_diff" ]]; then
+      # Branch diff mode iter 2+: full branch diff (merge-base → working tree)
+      # includes both committed branch changes and uncommitted re-fix edits
+      export DIFF_FILE="$_log_dir/diff-${_iteration}-${_j}.diff"
+      git diff "$(git merge-base "$TARGET_BRANCH" "$CURRENT_BRANCH")" > "$DIFF_FILE"
+      if [[ ! -s "$DIFF_FILE" ]]; then
+        echo "  No remaining diff — skipping self-review." >&2
+        break
+      fi
     else
       # Check if fix produced any changes vs pre-fix snapshot
       if ! _fix_files_tmp=$(_changed_files_since_snapshot "$_pre_fix_state"); then
