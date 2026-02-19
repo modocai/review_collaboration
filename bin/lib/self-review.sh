@@ -73,7 +73,18 @@ _self_review_subloop() {
       # Branch diff mode iter 2+: full branch diff (merge-base → working tree)
       # includes both committed branch changes and uncommitted re-fix edits
       export DIFF_FILE="$_log_dir/diff-${_iteration}-${_j}.diff"
+      # Stage untracked files as intent-to-add so git diff can see them
+      local _untracked_tmp; _untracked_tmp=$(mktemp)
+      git ls-files --others --exclude-standard -z > "$_untracked_tmp"
+      if [[ -s "$_untracked_tmp" ]]; then
+        xargs -0 git add --intent-to-add -- < "$_untracked_tmp" 2>/dev/null || true
+      fi
       git diff "$(git merge-base "$TARGET_BRANCH" "$CURRENT_BRANCH")" > "$DIFF_FILE"
+      # Undo intent-to-add to preserve original index state
+      if [[ -s "$_untracked_tmp" ]]; then
+        xargs -0 git reset --quiet -- < "$_untracked_tmp" 2>/dev/null || true
+      fi
+      rm -f "$_untracked_tmp"
       if [[ ! -s "$DIFF_FILE" ]]; then
         echo "  No remaining diff — skipping self-review." >&2
         break
