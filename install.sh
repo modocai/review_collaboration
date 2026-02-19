@@ -24,6 +24,7 @@ mkdir -p "$INSTALL_DIR/logs/refactor"
 cp -r "$SCRIPT_DIR/bin" "$INSTALL_DIR/"
 chmod +x "$INSTALL_DIR/bin/review-loop.sh"
 chmod +x "$INSTALL_DIR/bin/refactor-suggest.sh"
+chmod +x "$INSTALL_DIR/bin/lib/self-review.sh"
 
 # Copy active prompts
 mkdir -p "$INSTALL_DIR/prompts/active"
@@ -38,6 +39,17 @@ if [[ -f "$SCRIPT_DIR/.refactorsuggestrc.example" ]]; then
   cp "$SCRIPT_DIR/.refactorsuggestrc.example" "$INSTALL_DIR/"
   echo "Copied .refactorsuggestrc.example"
 fi
+
+# Generate install manifest from SOURCE files (not target directory)
+# This ensures only installer-owned files are tracked, preserving user-added files on reinstall.
+{
+  find "$SCRIPT_DIR/bin" -type f | sed "s|^${SCRIPT_DIR}/||"
+  find "$SCRIPT_DIR/prompts/active" -type f | sed "s|^${SCRIPT_DIR}/||"
+  for _rc in .reviewlooprc.example .refactorsuggestrc.example; do
+    [[ -f "$SCRIPT_DIR/$_rc" ]] && echo "$_rc"
+  done
+} | sort > "$INSTALL_DIR/.install-manifest"
+echo "Generated .install-manifest ($(wc -l < "$INSTALL_DIR/.install-manifest") files)"
 
 # Add .review-loop/ to .gitignore
 GITIGNORE="$TARGET_DIR/.gitignore"

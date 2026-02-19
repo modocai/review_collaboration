@@ -6,11 +6,12 @@ VERSION="0.1.0"
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 PROMPTS_DIR="$SCRIPT_DIR/../prompts/active"
 source "$SCRIPT_DIR/lib/common.sh"
+source "$SCRIPT_DIR/lib/self-review.sh"
 
 # ── Defaults ──────────────────────────────────────────────────────────
 SCOPE="micro"
 TARGET_BRANCH="develop"
-MAX_LOOP=""
+MAX_LOOP="1"
 MAX_SUBLOOP=4
 DRY_RUN=false
 AUTO_APPROVE=false
@@ -60,7 +61,7 @@ Usage: refactor-suggest.sh [OPTIONS]
 Options:
   --scope <scope>          Refactoring scope: micro|module|layer|full (default: micro)
   -t, --target <branch>    Target branch to base from (default: develop)
-  -n, --max-loop <N>       Maximum analysis-fix iterations (required)
+  -n, --max-loop <N>       Maximum analysis-fix iterations (default: 1)
   --max-subloop <N>        Maximum self-review sub-iterations per fix (default: 4)
   --no-self-review         Disable self-review (equivalent to --max-subloop 0)
   --dry-run                Run analysis only, do not apply fixes
@@ -122,12 +123,6 @@ while [[ $# -gt 0 ]]; do
 done
 
 # ── Validation ────────────────────────────────────────────────────────
-if [[ -z "$MAX_LOOP" ]]; then
-  echo "Error: -n / --max-loop is required."
-  echo ""
-  usage 1
-fi
-
 if ! [[ "$MAX_LOOP" =~ ^[1-9][0-9]*$ ]]; then
   echo "Error: --max-loop must be a positive integer, got '$MAX_LOOP'."
   exit 1
@@ -216,19 +211,13 @@ REFACTOR_BRANCH="refactor/${SCOPE}-${TIMESTAMP}"
 
 if [[ "$DRY_RUN" == false ]]; then
   # Stash allowlisted files that may conflict with branch switch
-  _needs_stash=false
-  _stash_files=()
-  for _sf in .gitignore .refactorsuggestrc .reviewlooprc; do
-    if git diff --name-only | grep -qx "$(printf '%s' "$_sf" | sed 's/[.[\*^$()+?{|]/\\&/g')" \
-    || git diff --cached --name-only | grep -qx "$(printf '%s' "$_sf" | sed 's/[.[\*^$()+?{|]/\\&/g')" \
-    || git ls-files --others --exclude-standard | grep -qx "$(printf '%s' "$_sf" | sed 's/[.[\*^$()+?{|]/\\&/g')"; then
-      _stash_files+=("$_sf")
-    fi
-  done
-  if [[ ${#_stash_files[@]} -gt 0 ]]; then
-    _needs_stash=true
-    git stash push --quiet --include-untracked -- "${_stash_files[@]}"
+  _stash_rc=0
+  _stash_allowlisted .gitignore .refactorsuggestrc .reviewlooprc || _stash_rc=$?
+  if [[ "$_stash_rc" -eq 2 ]]; then
+    echo "Error: failed to stash allowlisted files" >&2
+    exit 1
   fi
+  _needs_stash=$([[ "$_stash_rc" -eq 0 ]] && echo true || echo false)
 
   echo "Creating branch: $REFACTOR_BRANCH (from $TARGET_BRANCH)"
   if ! git checkout -b "$REFACTOR_BRANCH" "$TARGET_BRANCH"; then
@@ -238,12 +227,10 @@ if [[ "$DRY_RUN" == false ]]; then
   fi
 
   if [[ "$_needs_stash" == true ]]; then
-    if ! git stash pop --index --quiet 2>/dev/null; then
-      if ! git stash pop --quiet; then
-        echo "Error: stash pop conflict while restoring .gitignore/.refactorsuggestrc/.reviewlooprc." >&2
-        echo "  Resolve manually: git stash show, git stash drop" >&2
-        exit 1
-      fi
+    if ! _unstash_allowlisted; then
+      echo "Error: stash pop conflict while restoring .gitignore/.refactorsuggestrc/.reviewlooprc." >&2
+      echo "  Resolve manually: git stash show, git stash drop" >&2
+      exit 1
     fi
   fi
   unset _needs_stash
@@ -281,11 +268,9 @@ _allowed_dirty_stashed=false
 _cleanup() {
   rm -f "${PRE_FIX_STATE:-}"
   if [[ "${_allowed_dirty_stashed:-false}" == true ]]; then
-    if ! git stash pop --index --quiet 2>/dev/null; then
-      if ! git stash pop --quiet 2>/dev/null; then
-        echo "  Error: failed to restore stashed edits. Check 'git stash list'." >&2
-        FINAL_STATUS="stash_conflict"
-      fi
+    if ! _unstash_allowlisted; then
+      echo "  Error: failed to restore stashed edits. Check 'git stash list'." >&2
+      FINAL_STATUS="stash_conflict"
     fi
     _allowed_dirty_stashed=false
   fi
@@ -379,18 +364,14 @@ for (( i=1; i<=MAX_LOOP; i++ )); do
   fi
 
   # ── Stash allowed dirty files ───────────────────────────────────
-  _allowed_dirty_stashed=false
-  _allowed_dirty_files=()
-  for _adf in .gitignore .refactorsuggestrc .reviewlooprc; do
-    if git diff --name-only | grep -qx "$(printf '%s' "$_adf" | sed 's/[.[\*^$()+?{|]/\\&/g')" \
-    || git diff --cached --name-only | grep -qx "$(printf '%s' "$_adf" | sed 's/[.[\*^$()+?{|]/\\&/g')" \
-    || git ls-files --others --exclude-standard | grep -qx "$(printf '%s' "$_adf" | sed 's/[.[\*^$()+?{|]/\\&/g')"; then
-      _allowed_dirty_files+=("$_adf")
-    fi
-  done
-  if [[ ${#_allowed_dirty_files[@]} -gt 0 ]]; then
-    git stash push --quiet --include-untracked -- "${_allowed_dirty_files[@]}" 2>/dev/null && _allowed_dirty_stashed=true
+  _stash_rc=0
+  _stash_allowlisted .gitignore .refactorsuggestrc .reviewlooprc || _stash_rc=$?
+  if [[ "$_stash_rc" -eq 2 ]]; then
+    echo "Error: failed to stash allowlisted files" >&2
+    FINAL_STATUS="stash_error"
+    break
   fi
+  _allowed_dirty_stashed=$([[ "$_stash_rc" -eq 0 ]] && echo true || echo false)
 
   # ── Snapshot pre-fix working tree state ─────────────────────────
   PRE_FIX_STATE=$(_snapshot_worktree)
@@ -408,79 +389,15 @@ for (( i=1; i<=MAX_LOOP; i++ )); do
 
   # ── g. Claude self-review sub-loop ──────────────────────────────
   SELF_REVIEW_SUMMARY=""
-  ORIGINAL_REVIEW_JSON="$REVIEW_JSON"
   if [[ "$MAX_SUBLOOP" -gt 0 ]]; then
-    for (( j=1; j<=MAX_SUBLOOP; j++ )); do
-      if ! _fix_files_tmp=$(_changed_files_since_snapshot "$PRE_FIX_STATE"); then
-        echo "  No working tree changes from fix — skipping self-review."
-        break
-      fi
-
-      echo "[$(date +%H:%M:%S)] Running Claude self-review (sub-iteration $j/$MAX_SUBLOOP)..."
-      SELF_REVIEW_FILE="$LOG_DIR/self-review-${i}-${j}.json"
-
-      xargs -0 git add --intent-to-add -- < "$_fix_files_tmp" 2>/dev/null || true
-      export DIFF_FILE="$LOG_DIR/diff-${i}-${j}.diff"
-      xargs -0 git diff HEAD -- < "$_fix_files_tmp" > "$DIFF_FILE"
-      xargs -0 git reset --quiet -- < "$_fix_files_tmp" 2>/dev/null || true
-      rm -f "$_fix_files_tmp"
-
-      export REVIEW_JSON="$ORIGINAL_REVIEW_JSON"
-      SELF_REVIEW_PROMPT=$(envsubst '$CURRENT_BRANCH $TARGET_BRANCH $ITERATION $REVIEW_JSON $DIFF_FILE' < "$PROMPTS_DIR/claude-self-review.prompt.md")
-
-      if ! printf '%s' "$SELF_REVIEW_PROMPT" | claude -p - \
-        --allowedTools "Read,Glob,Grep" \
-        > "$SELF_REVIEW_FILE" 2>&1; then
-        echo "  Warning: self-review failed (sub-iteration $j). Continuing with current fixes."
-        SELF_REVIEW_SUMMARY="${SELF_REVIEW_SUMMARY}Sub-iteration $j: self-review failed\n"
-        break
-      fi
-
-      if [[ ! -s "$SELF_REVIEW_FILE" ]]; then
-        echo "  Warning: self-review produced empty output (sub-iteration $j)."
-        SELF_REVIEW_SUMMARY="${SELF_REVIEW_SUMMARY}Sub-iteration $j: empty output\n"
-        break
-      fi
-      _rc=0
-      SELF_REVIEW_JSON=$(_extract_json_from_file "$SELF_REVIEW_FILE") || _rc=$?
-      if [[ $_rc -ne 0 ]]; then
-        if [[ $_rc -eq 2 ]]; then
-          echo "  Warning: self-review output file not found ($SELF_REVIEW_FILE)."
-        else
-          echo "  Warning: could not parse self-review output."
-        fi
-        echo "  Continuing with current fixes."
-        SELF_REVIEW_SUMMARY="${SELF_REVIEW_SUMMARY}Sub-iteration $j: parse error\n"
-        break
-      fi
-
-      SR_FINDINGS=$(printf '%s' "$SELF_REVIEW_JSON" | jq '.findings | length')
-      SR_OVERALL=$(printf '%s' "$SELF_REVIEW_JSON" | jq -r '.overall_correctness')
-      echo "  Self-review: $SR_FINDINGS findings | $SR_OVERALL"
-
-      if [[ "$SR_FINDINGS" -eq 0 ]] && [[ "$SR_OVERALL" == "patch is correct" ]]; then
-        echo "  Self-review passed — fixes are clean."
-        SELF_REVIEW_SUMMARY="${SELF_REVIEW_SUMMARY}Sub-iteration $j: 0 findings — passed\n"
-        break
-      fi
-
-      REFIX_FILE="$LOG_DIR/refix-${i}-${j}.md"
-      REFIX_OPINION_FILE="$LOG_DIR/refix-opinion-${i}-${j}.md"
-
-      # Carry over refactoring_plan from original review so scope-aware prompts work
-      REFIX_INPUT_JSON=$(printf '%s' "$SELF_REVIEW_JSON" | jq --argjson plan \
-        "$(printf '%s' "$ORIGINAL_REVIEW_JSON" | jq '.refactoring_plan // null')" \
-        'if $plan then . + {refactoring_plan: $plan} else . end')
-
-      if ! _claude_two_step_fix "$REFIX_INPUT_JSON" "$REFIX_OPINION_FILE" "$REFIX_FILE" "re-fix" \
-        "claude-refactor-fix.prompt.md" "claude-refactor-fix-execute.prompt.md"; then
-        SELF_REVIEW_SUMMARY="${SELF_REVIEW_SUMMARY}Sub-iteration $j: $SR_FINDINGS findings — re-fix failed\n"
-        break
-      fi
-      SELF_REVIEW_SUMMARY="${SELF_REVIEW_SUMMARY}Sub-iteration $j: $SR_FINDINGS findings — re-fixed\n"
-    done
+    SELF_REVIEW_SUMMARY=$(
+      SR_OPINION_PROMPT="claude-refactor-fix.prompt.md"
+      SR_EXECUTE_PROMPT="claude-refactor-fix-execute.prompt.md"
+      SR_REFIX_JSON_HOOK="_sr_inject_refactoring_plan"
+      _self_review_subloop \
+        "$PRE_FIX_STATE" "$MAX_SUBLOOP" "$LOG_DIR" "$i" "$REVIEW_JSON"
+    )
   fi
-  export REVIEW_JSON="$ORIGINAL_REVIEW_JSON"
 
   # ── h. Commit & push ────────────────────────────────────────────
   COMMIT_MSG="refactor(ai-$SCOPE): apply iteration $i changes
