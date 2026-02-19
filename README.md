@@ -318,11 +318,12 @@ The loop terminates when any of these occur:
 ## Uninstall
 
 ```bash
-# Remove review-loop from a target project
+# Quick — just nuke the directory
+rm -rf .review-loop
+
+# Thorough — also cleans up .gitignore entries
 ./uninstall.sh /path/to/your-project
 ```
-
-This removes the `.review-loop/` directory and its `.gitignore` entry.
 
 ## Contributing
 
