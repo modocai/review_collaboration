@@ -24,6 +24,7 @@ mkdir -p "$INSTALL_DIR/logs/refactor"
 cp -r "$SCRIPT_DIR/bin" "$INSTALL_DIR/"
 chmod +x "$INSTALL_DIR/bin/review-loop.sh"
 chmod +x "$INSTALL_DIR/bin/refactor-suggest.sh"
+chmod +x "$INSTALL_DIR/bin/lib/self-review.sh"
 
 # Copy active prompts
 mkdir -p "$INSTALL_DIR/prompts/active"
