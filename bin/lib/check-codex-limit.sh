@@ -44,7 +44,7 @@ _codex_limit_find_latest_token_count() {
         printf '%s' "$_result"
         return 0
       fi
-    done <<< "$_files"
+    done < <(printf '%s\n' "$_files")
   done
 
   return 1
