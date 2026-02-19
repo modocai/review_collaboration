@@ -79,7 +79,11 @@ _self_review_subloop() {
       if [[ -s "$_untracked_tmp" ]]; then
         xargs -0 git add --intent-to-add -- < "$_untracked_tmp" 2>/dev/null || true
       fi
-      git diff "$(git merge-base "$TARGET_BRANCH" "$CURRENT_BRANCH")" > "$DIFF_FILE"
+      # Exclude log directory from diff to avoid reviewing script artifacts
+      local _log_prefix
+      _log_prefix=$(cd "$_log_dir" 2>/dev/null && git rev-parse --show-prefix 2>/dev/null) || _log_prefix=""
+      git diff "$(git merge-base "$TARGET_BRANCH" "$CURRENT_BRANCH")" \
+        ${_log_prefix:+-- ":(exclude)${_log_prefix%/}"} > "$DIFF_FILE"
       # Undo intent-to-add to preserve original index state
       if [[ -s "$_untracked_tmp" ]]; then
         xargs -0 git reset --quiet -- < "$_untracked_tmp" 2>/dev/null || true
@@ -305,6 +309,11 @@ EOF
     if [[ "$TARGET_BRANCH" == "$CURRENT_BRANCH" ]]; then
       echo "Error: working tree is clean and no target branch specified."
       echo "Use -t <branch> to review branch diff, or make changes first."
+      exit 1
+    fi
+    if ! git merge-base "$TARGET_BRANCH" "$CURRENT_BRANCH" &>/dev/null; then
+      echo "Error: cannot find merge-base between '$TARGET_BRANCH' and '$CURRENT_BRANCH'."
+      echo "Check that '$TARGET_BRANCH' is a valid branch/ref."
       exit 1
     fi
     if git diff --quiet "$TARGET_BRANCH...$CURRENT_BRANCH"; then
