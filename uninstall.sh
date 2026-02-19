@@ -57,7 +57,7 @@ if [[ -d "$TARGET_DIR/.review-loop" ]]; then
     find "$_install_dir" -mindepth 1 -type d -empty -delete 2>/dev/null || true
   else
     # Legacy fallback: hardcoded file list (pre-manifest installs)
-    for _bfile in review-loop.sh refactor-suggest.sh lib/common.sh lib/check-claude-limit.sh; do
+    for _bfile in review-loop.sh refactor-suggest.sh lib/common.sh lib/check-claude-limit.sh lib/self-review.sh; do
       if [[ -f "$_install_dir/bin/$_bfile" ]]; then
         rm "$_install_dir/bin/$_bfile"
         echo "Removed .review-loop/bin/$_bfile"

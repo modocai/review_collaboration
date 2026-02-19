@@ -6,6 +6,7 @@ VERSION="0.1.0"
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 PROMPTS_DIR="$SCRIPT_DIR/../prompts/active"
 source "$SCRIPT_DIR/lib/common.sh"
+source "$SCRIPT_DIR/lib/self-review.sh"
 
 # ── Defaults ──────────────────────────────────────────────────────────
 TARGET_BRANCH="develop"
@@ -331,81 +332,10 @@ EOF
 
   # ── g2. Claude self-review sub-loop ─────────────────────────────
   SELF_REVIEW_SUMMARY=""
-  ORIGINAL_REVIEW_JSON="$REVIEW_JSON"
   if [[ "$MAX_SUBLOOP" -gt 0 ]]; then
-    for (( j=1; j<=MAX_SUBLOOP; j++ )); do
-      # Check if Claude's fix produced any changes vs pre-fix snapshot
-      if ! _fix_files_tmp=$(_changed_files_since_snapshot "$PRE_FIX_STATE"); then
-        echo "  No working tree changes from fix — skipping self-review."
-        break
-      fi
-
-      echo "[$(date +%H:%M:%S)] Running Claude self-review (sub-iteration $j/$MAX_SUBLOOP)..."
-      SELF_REVIEW_FILE="$LOG_DIR/self-review-${i}-${j}.json"
-
-      # Dump diff for only files changed by the fix (exclude pre-existing dirty files)
-      # Stage untracked files as intent-to-add so git diff HEAD can see them
-      xargs -0 git add --intent-to-add -- < "$_fix_files_tmp" 2>/dev/null || true
-      export DIFF_FILE="$LOG_DIR/diff-${i}-${j}.diff"
-      xargs -0 git diff HEAD -- < "$_fix_files_tmp" > "$DIFF_FILE"
-      # Immediately undo intent-to-add so we never clobber pre-existing staged state
-      xargs -0 git reset --quiet -- < "$_fix_files_tmp" 2>/dev/null || true
-      rm -f "$_fix_files_tmp"
-
-      # Ensure self-review prompt always references the original Codex findings
-      export REVIEW_JSON="$ORIGINAL_REVIEW_JSON"
-      SELF_REVIEW_PROMPT=$(envsubst '$CURRENT_BRANCH $TARGET_BRANCH $ITERATION $REVIEW_JSON $DIFF_FILE' < "$PROMPTS_DIR/claude-self-review.prompt.md")
-
-      # Claude self-review — tool access for git diff, file reading, etc.
-      if ! printf '%s' "$SELF_REVIEW_PROMPT" | claude -p - \
-        --allowedTools "Read,Glob,Grep" \
-        > "$SELF_REVIEW_FILE" 2>&1; then
-        echo "  Warning: self-review failed (sub-iteration $j). Continuing with current fixes."
-        SELF_REVIEW_SUMMARY="${SELF_REVIEW_SUMMARY}Sub-iteration $j: self-review failed\n"
-        break
-      fi
-
-      # JSON parsing (same logic as codex review)
-      if [[ ! -s "$SELF_REVIEW_FILE" ]]; then
-        echo "  Warning: self-review produced empty output (sub-iteration $j). Continuing with current fixes."
-        SELF_REVIEW_SUMMARY="${SELF_REVIEW_SUMMARY}Sub-iteration $j: empty output\n"
-        break
-      fi
-      _rc=0
-      SELF_REVIEW_JSON=$(_extract_json_from_file "$SELF_REVIEW_FILE") || _rc=$?
-      if [[ $_rc -ne 0 ]]; then
-        if [[ $_rc -eq 2 ]]; then
-          echo "  Warning: self-review output file not found ($SELF_REVIEW_FILE)."
-        else
-          echo "  Warning: could not parse self-review output."
-        fi
-        echo "  Continuing with current fixes."
-        SELF_REVIEW_SUMMARY="${SELF_REVIEW_SUMMARY}Sub-iteration $j: parse error\n"
-        break
-      fi
-
-      SR_FINDINGS=$(printf '%s' "$SELF_REVIEW_JSON" | jq '.findings | length')
-      SR_OVERALL=$(printf '%s' "$SELF_REVIEW_JSON" | jq -r '.overall_correctness')
-      echo "  Self-review: $SR_FINDINGS findings | $SR_OVERALL"
-
-      if [[ "$SR_FINDINGS" -eq 0 ]] && [[ "$SR_OVERALL" == "patch is correct" ]]; then
-        echo "  Self-review passed — fixes are clean."
-        SELF_REVIEW_SUMMARY="${SELF_REVIEW_SUMMARY}Sub-iteration $j: 0 findings — passed\n"
-        break
-      fi
-
-      # Claude re-fix (two-step: opinion → execute)
-      REFIX_FILE="$LOG_DIR/refix-${i}-${j}.md"
-      REFIX_OPINION_FILE="$LOG_DIR/refix-opinion-${i}-${j}.md"
-
-      if ! _claude_two_step_fix "$SELF_REVIEW_JSON" "$REFIX_OPINION_FILE" "$REFIX_FILE" "re-fix"; then
-        SELF_REVIEW_SUMMARY="${SELF_REVIEW_SUMMARY}Sub-iteration $j: $SR_FINDINGS findings — re-fix failed\n"
-        break
-      fi
-      SELF_REVIEW_SUMMARY="${SELF_REVIEW_SUMMARY}Sub-iteration $j: $SR_FINDINGS findings — re-fixed\n"
-    done
+    SELF_REVIEW_SUMMARY=$(_self_review_subloop \
+      "$PRE_FIX_STATE" "$MAX_SUBLOOP" "$LOG_DIR" "$i" "$REVIEW_JSON")
   fi
-  export REVIEW_JSON="$ORIGINAL_REVIEW_JSON"
 
   # ── h. Commit & push fixes ──────────────────────────────────────
   if [[ "$AUTO_COMMIT" == true ]]; then
