@@ -23,9 +23,9 @@ _codex_limit_find_latest_token_count() {
   for _offset in {0..6}; do
     # macOS/BSD vs GNU date
     if date -v-1d +%s &>/dev/null; then
-      _day_dir=$(date -u -v-"${_offset}d" +%Y/%m/%d)
+      _day_dir=$(date -v-"${_offset}d" +%Y/%m/%d)
     else
-      _day_dir=$(date -u -d "$_offset days ago" +%Y/%m/%d)
+      _day_dir=$(date -d "$_offset days ago" +%Y/%m/%d)
     fi
 
     _dir="$_sessions_dir/$_day_dir"
@@ -102,7 +102,7 @@ _check_codex_token_budget() {
   _event=$(_codex_limit_find_latest_token_count 2>/dev/null) || true
 
   if [[ -z "$_event" ]]; then
-    printf '{"five_hour_used_pct":0,"seven_day_used_pct":null,"mode":"session_log","resets_at":null,"seven_day_resets_at":null}'
+    printf '{"five_hour_used_pct":null,"seven_day_used_pct":null,"mode":"no_data","resets_at":null,"seven_day_resets_at":null}'
     return 0
   fi
 
@@ -151,6 +151,11 @@ _codex_budget_sufficient() {
   _budget_json="${2:-$(_check_codex_token_budget)}"
   _pct=$(printf '%s' "$_budget_json" | jq -r '.five_hour_used_pct')
 
+  if [[ "$_pct" == "null" ]]; then
+    echo "Warning: no budget data available — failing closed" >&2
+    return 1
+  fi
+
   if [[ "$_pct" -lt "$_threshold" ]]; then
     return 0
   else
@@ -178,7 +183,9 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   echo "Codex CLI Token Budget"
   echo "========================"
   echo "  Mode:       $_mode"
-  if [[ "$_resets" != "n/a" ]] && [[ "$_resets" != "null" ]]; then
+  if [[ "$_pct" == "null" ]]; then
+    echo "  5h used:    n/a (no session data)"
+  elif [[ "$_resets" != "n/a" ]] && [[ "$_resets" != "null" ]]; then
     echo "  5h used:    ${_pct}%    (resets $_resets)"
   else
     echo "  5h used:    ${_pct}%"
@@ -202,7 +209,9 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   for _entry in $_thresholds; do
     _s="${_entry%%:*}"
     _thr="${_entry##*:}"
-    if [[ "$_pct" -lt "$_thr" ]]; then
+    if [[ "$_pct" == "null" ]]; then
+      printf '  %-8s NO-GO (no data)\n' "$_s:"
+    elif [[ "$_pct" -lt "$_thr" ]]; then
       printf '  %-8s GO\n' "$_s:"
     else
       printf '  %-8s NO-GO\n' "$_s:"
