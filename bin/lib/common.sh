@@ -242,23 +242,20 @@ _commit_and_push() {
 _resume_detect_state() {
   local _log_dir="$1" _commit_pattern="$2"
 
-  # 1) summary.md check
-  if [[ ! -f "$_log_dir/summary.md" ]]; then
-    printf '{"status":"no_logs","resume_from":1,"reuse_review":false}'
-    return 0
+  # 1) If summary.md exists, check for completed status
+  if [[ -f "$_log_dir/summary.md" ]]; then
+    local _final_status
+    _final_status=$(sed -n 's/.*\*\*Final status\*\*: //p' "$_log_dir/summary.md" | head -1)
+    [[ -z "$_final_status" ]] && _final_status="unknown"
+
+    case "$_final_status" in
+      all_clear|no_diff|dry_run|max_iterations_reached)
+        printf '{"status":"completed","resume_from":0,"reuse_review":false,"prev_status":"%s"}' "$_final_status"
+        return 0 ;;
+    esac
   fi
 
-  # 2) Extract FINAL_STATUS
-  local _final_status
-  _final_status=$(grep -oP '(?<=\*\*Final status\*\*: ).*' "$_log_dir/summary.md" || echo "unknown")
-
-  case "$_final_status" in
-    all_clear|no_diff|dry_run|max_iterations_reached)
-      printf '{"status":"completed","resume_from":0,"reuse_review":false,"prev_status":"%s"}' "$_final_status"
-      return 0 ;;
-  esac
-
-  # 3) Find last review file to determine failed iteration
+  # 2) Find last review file to determine failed iteration
   local _last_i=0 _f _n
   for _f in "$_log_dir"/review-*.json; do
     [[ -e "$_f" ]] || continue
@@ -267,11 +264,11 @@ _resume_detect_state() {
   done
 
   if [[ "$_last_i" -eq 0 ]]; then
-    printf '{"status":"resumable","resume_from":1,"reuse_review":false}'
+    printf '{"status":"no_logs","resume_from":1,"reuse_review":false}'
     return 0
   fi
 
-  # 4) Check if commit exists for this iteration
+  # 3) Check if commit exists for this iteration
   if git log --oneline --grep="$_commit_pattern ${_last_i}" HEAD 2>/dev/null | grep -q .; then
     # Commit completed → start from next iteration
     printf '{"status":"resumable","resume_from":%d,"reuse_review":false}' $(( _last_i + 1 ))
