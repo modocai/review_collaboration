@@ -113,6 +113,8 @@ Options:
   --no-dry-run             Force fixes even if .refactorsuggestrc sets DRY_RUN=true
   --auto-approve           Skip interactive confirmation for layer/full scope
   --create-pr              Create a draft PR after completing all iterations
+  --with-review            Run review-loop after PR creation (default: 4 iterations)
+  --with-review-loops <N>  Set review-loop iteration count (implies --with-review)
   -V, --version            Show version
   -h, --help               Show this help message
 
@@ -121,6 +123,8 @@ Examples:
   refactor-suggest.sh --scope module -n 2 --dry-run   # analyze module duplication
   refactor-suggest.sh --scope layer -n 1 --auto-approve  # cross-cutting concerns
   refactor-suggest.sh --scope full -n 1 --create-pr   # architecture redesign + PR
+  refactor-suggest.sh --scope micro -n 2 --with-review          # refactor + auto review
+  refactor-suggest.sh --scope module -n 3 --with-review-loops 6 # custom review iterations
 ```
 
 ### Scopes
@@ -143,6 +147,7 @@ Examples:
 6. Auto-commit & push to refactoring branch
 7. Repeat until clean or max iterations reached
 8. (--create-pr) Create draft PR
+9. (--with-review) Run review-loop on the new PR
 ```
 
 Recommended workflow: start with `--dry-run` to review findings, then re-run without it to apply.
@@ -178,6 +183,8 @@ MAX_SUBLOOP=4
 DRY_RUN=true
 AUTO_APPROVE=false
 CREATE_PR=false
+WITH_REVIEW=false
+REVIEW_LOOPS=4
 PROMPTS_DIR="./custom-prompts"
 ```
 
