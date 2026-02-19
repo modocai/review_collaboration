@@ -318,11 +318,14 @@ The loop terminates when any of these occur:
 ## Uninstall
 
 ```bash
-# Remove review-loop from a target project
-./uninstall.sh /path/to/your-project
-```
+# Quick — just nuke the directory
+rm -rf .review-loop
 
-This removes the `.review-loop/` directory and its `.gitignore` entry.
+# Thorough — also cleans up .gitignore entries (requires source repo)
+git clone --depth 1 https://github.com/modocai/mr-overkill.git /tmp/mr-overkill \
+  && /tmp/mr-overkill/uninstall.sh /path/to/your-project \
+  && rm -rf /tmp/mr-overkill
+```
 
 ## Contributing
 

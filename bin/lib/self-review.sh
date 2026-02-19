@@ -37,6 +37,8 @@ _sr_inject_refactoring_plan() {
 #   SR_EXECUTE_PROMPT    re-fix execute prompt filename (default: claude-fix-execute.prompt.md)
 #   SR_REFIX_JSON_HOOK   re-fix JSON transform function name (stdin=self_review_json, $1=original_json)
 #   SR_DRY_RUN           if "true", review only — skip re-fix
+#   SR_FIX_NITS          if "true", also flag nits and potential issues
+#   SR_INITIAL_DIFF_FILE pre-generated diff for first iteration (branch diff mode)
 #
 # Required globals (read-only): CURRENT_BRANCH, TARGET_BRANCH, PROMPTS_DIR
 #
@@ -54,6 +56,8 @@ _self_review_subloop() {
   local _execute_prompt="${SR_EXECUTE_PROMPT:-claude-fix-execute.prompt.md}"
   local _refix_json_hook="${SR_REFIX_JSON_HOOK:-}"
   local _dry_run="${SR_DRY_RUN:-false}"
+  local _initial_diff="${SR_INITIAL_DIFF_FILE:-}"
+  local _fix_nits="${SR_FIX_NITS:-false}"
 
   local _summary="" _j _fix_files_tmp _self_review_file _self_review_prompt
   local _rc _self_review_json _sr_findings _sr_overall
@@ -62,27 +66,71 @@ _self_review_subloop() {
   export ITERATION="$_iteration"
 
   for (( _j=1; _j<=_max_subloop; _j++ )); do
-    # Check if fix produced any changes vs pre-fix snapshot
-    if ! _fix_files_tmp=$(_changed_files_since_snapshot "$_pre_fix_state"); then
-      echo "  No working tree changes from fix — skipping self-review." >&2
-      break
+    # First iteration can use a pre-generated diff (branch diff mode)
+    if [[ $_j -eq 1 ]] && [[ -n "$_initial_diff" ]] && [[ -s "$_initial_diff" ]]; then
+      export DIFF_FILE="$_initial_diff"
+    elif [[ -n "$_initial_diff" ]]; then
+      # Branch diff mode iter 2+: full branch diff (merge-base → working tree)
+      # includes both committed branch changes and uncommitted re-fix edits
+      export DIFF_FILE="$_log_dir/diff-${_iteration}-${_j}.diff"
+      # Stage untracked files as intent-to-add so git diff can see them
+      local _untracked_tmp; _untracked_tmp=$(mktemp)
+      git ls-files --others --exclude-standard -z > "$_untracked_tmp"
+      if [[ -s "$_untracked_tmp" ]]; then
+        xargs -0 git add --intent-to-add -- < "$_untracked_tmp" 2>/dev/null || true
+      fi
+      # Exclude log directory from diff to avoid reviewing script artifacts
+      local _log_prefix
+      _log_prefix=$(cd "$_log_dir" 2>/dev/null && git rev-parse --show-prefix 2>/dev/null) || _log_prefix=""
+      git diff "$(git merge-base "$TARGET_BRANCH" "$CURRENT_BRANCH")" \
+        ${_log_prefix:+-- ":(exclude)${_log_prefix%/}"} > "$DIFF_FILE"
+      # Undo intent-to-add to preserve original index state
+      if [[ -s "$_untracked_tmp" ]]; then
+        xargs -0 git reset --quiet -- < "$_untracked_tmp" 2>/dev/null || true
+      fi
+      rm -f "$_untracked_tmp"
+      if [[ ! -s "$DIFF_FILE" ]]; then
+        echo "  No remaining diff — skipping self-review." >&2
+        break
+      fi
+    else
+      # Check if fix produced any changes vs pre-fix snapshot
+      if ! _fix_files_tmp=$(_changed_files_since_snapshot "$_pre_fix_state"); then
+        echo "  No working tree changes from fix — skipping self-review." >&2
+        break
+      fi
+
+      # Dump diff for only files changed by the fix (exclude pre-existing dirty files)
+      # Stage untracked files as intent-to-add so git diff HEAD can see them
+      xargs -0 git add --intent-to-add -- < "$_fix_files_tmp" 2>/dev/null || true
+      export DIFF_FILE="$_log_dir/diff-${_iteration}-${_j}.diff"
+      xargs -0 git diff HEAD -- < "$_fix_files_tmp" > "$DIFF_FILE"
+      # Immediately undo intent-to-add so we never clobber pre-existing staged state
+      xargs -0 git reset --quiet -- < "$_fix_files_tmp" 2>/dev/null || true
+      rm -f "$_fix_files_tmp"
     fi
 
     echo "[$(date +%H:%M:%S)] Running Claude self-review (sub-iteration $_j/$_max_subloop)..." >&2
     _self_review_file="$_log_dir/self-review-${_iteration}-${_j}.json"
 
-    # Dump diff for only files changed by the fix (exclude pre-existing dirty files)
-    # Stage untracked files as intent-to-add so git diff HEAD can see them
-    xargs -0 git add --intent-to-add -- < "$_fix_files_tmp" 2>/dev/null || true
-    export DIFF_FILE="$_log_dir/diff-${_iteration}-${_j}.diff"
-    xargs -0 git diff HEAD -- < "$_fix_files_tmp" > "$DIFF_FILE"
-    # Immediately undo intent-to-add so we never clobber pre-existing staged state
-    xargs -0 git reset --quiet -- < "$_fix_files_tmp" 2>/dev/null || true
-    rm -f "$_fix_files_tmp"
-
     # Self-review prompt always references the original Codex findings
     export REVIEW_JSON="$_original_review_json"
-    _self_review_prompt=$(envsubst '$CURRENT_BRANCH $TARGET_BRANCH $ITERATION $REVIEW_JSON $DIFF_FILE' < "$PROMPTS_DIR/claude-self-review.prompt.md")
+
+    # Inject extra review guidelines when fix-nits mode is enabled
+    if [[ "$_fix_nits" == true ]]; then
+      export EXTRA_REVIEW_GUIDELINES="$(cat <<'GUIDELINES'
+6. **Fix nits and potential issues**: Beyond verifying the original fixes, also flag:
+   - Style inconsistencies in the changed code (naming, formatting)
+   - Potential edge cases or error handling gaps
+   - Minor improvements that are low-risk and localized to the changed files
+   - Do NOT flag issues in unchanged code — only in files touched by the diff
+GUIDELINES
+)"
+    else
+      export EXTRA_REVIEW_GUIDELINES=""
+    fi
+
+    _self_review_prompt=$(envsubst '$CURRENT_BRANCH $TARGET_BRANCH $ITERATION $REVIEW_JSON $DIFF_FILE $EXTRA_REVIEW_GUIDELINES' < "$PROMPTS_DIR/claude-self-review.prompt.md")
 
     # Claude self-review — tool access for git diff, file reading, etc.
     if ! printf '%s' "$_self_review_prompt" | claude -p - \
@@ -164,6 +212,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   # Defaults
   _MAX_SUBLOOP=4
   _DRY_RUN=false
+  _FIX_NITS=false
   _REFACTORING_PLAN_FILE=""
   _LOG_DIR=""
   _ITERATION=1
@@ -173,12 +222,13 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     cat <<'EOF'
 Usage: self-review.sh [OPTIONS]
 
-Self-review current working tree changes and optionally re-fix issues found.
-Requires a dirty working tree (uncommitted changes to review).
+Self-review changes and optionally re-fix issues found.
+Works with uncommitted changes or branch diff (clean tree + -t <branch>).
 
 Options:
   --max-subloop <N>         Maximum sub-iterations (default: 4)
   --dry-run                 Review only, do not apply re-fixes
+  --fix-nits                Also fix nits and potential issues in changed files
   --refactoring-plan <file> Load refactoring_plan from JSON file (scope context)
   --log-dir <dir>           Log directory (default: temporary directory)
   --iteration <N>           Iteration number for log filenames (default: 1)
@@ -186,9 +236,9 @@ Options:
   -h, --help                Show this help message
 
 Examples:
-  self-review.sh                             # self-review with defaults
-  self-review.sh --max-subloop 2             # limit to 2 sub-iterations
-  self-review.sh --dry-run                   # review only, no re-fixes
+  self-review.sh                             # review uncommitted changes
+  self-review.sh -t develop --dry-run        # review branch diff vs develop
+  self-review.sh -t main --max-subloop 2     # review + re-fix, max 2 iterations
   self-review.sh --refactoring-plan plan.json # include refactoring plan context
 EOF
     exit "${1:-0}"
@@ -200,6 +250,7 @@ EOF
         if [[ $# -lt 2 ]]; then echo "Error: '$1' requires an argument."; usage 1; fi
         _MAX_SUBLOOP="$2"; shift 2 ;;
       --dry-run)         _DRY_RUN=true; shift ;;
+      --fix-nits)        _FIX_NITS=true; shift ;;
       --refactoring-plan)
         if [[ $# -lt 2 ]]; then echo "Error: '$1' requires an argument."; usage 1; fi
         _REFACTORING_PLAN_FILE="$2"; shift 2 ;;
@@ -245,18 +296,32 @@ EOF
     exit 1
   fi
 
-  # Check dirty working tree (must have changes to review)
-  if git diff --quiet && git diff --cached --quiet \
-     && [[ -z "$(git ls-files --others --exclude-standard)" ]]; then
-    echo "Error: working tree is clean — nothing to self-review."
-    echo "Make changes first, then run self-review."
-    exit 1
-  fi
-
   # Set globals
   CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
   TARGET_BRANCH="${_TARGET:-$CURRENT_BRANCH}"
   export CURRENT_BRANCH TARGET_BRANCH
+
+  # Determine review mode: dirty working tree or branch diff
+  _BRANCH_DIFF_MODE=false
+  if git diff --quiet && git diff --cached --quiet \
+     && [[ -z "$(git ls-files --others --exclude-standard)" ]]; then
+    # Clean tree — fall back to branch diff mode
+    if [[ "$TARGET_BRANCH" == "$CURRENT_BRANCH" ]]; then
+      echo "Error: working tree is clean and no target branch specified."
+      echo "Use -t <branch> to review branch diff, or make changes first."
+      exit 1
+    fi
+    if ! git merge-base "$TARGET_BRANCH" "$CURRENT_BRANCH" &>/dev/null; then
+      echo "Error: cannot find merge-base between '$TARGET_BRANCH' and '$CURRENT_BRANCH'."
+      echo "Check that '$TARGET_BRANCH' is a valid branch/ref."
+      exit 1
+    fi
+    if git diff --quiet "$TARGET_BRANCH...$CURRENT_BRANCH"; then
+      echo "Error: no diff between $TARGET_BRANCH and $CURRENT_BRANCH — nothing to review."
+      exit 1
+    fi
+    _BRANCH_DIFF_MODE=true
+  fi
 
   PROMPTS_DIR="${PROMPTS_DIR:-$_SELF_REVIEW_SCRIPT_DIR/../../prompts/active}"
   if [[ ! -d "$PROMPTS_DIR" ]]; then
@@ -299,16 +364,31 @@ EOF
     _REVIEW_JSON=$(printf '%s' "$_REVIEW_JSON" | jq --argjson plan "$_plan" '. + {refactoring_plan: $plan}')
   fi
 
+  _MODE_LABEL="uncommitted changes"
+  if [[ "$_BRANCH_DIFF_MODE" == true ]]; then
+    _MODE_LABEL="branch diff ($TARGET_BRANCH...$CURRENT_BRANCH)"
+  fi
+
   echo "═══════════════════════════════════════════════════════"
   echo " Self-Review: $CURRENT_BRANCH (target: $TARGET_BRANCH)"
-  echo " Max sub-iterations: $_MAX_SUBLOOP | Dry-run: $_DRY_RUN"
+  echo " Mode: $_MODE_LABEL"
+  echo " Max sub-iterations: $_MAX_SUBLOOP | Dry-run: $_DRY_RUN | Fix-nits: $_FIX_NITS"
   echo "═══════════════════════════════════════════════════════"
   echo ""
+
+  # Generate branch diff for first iteration if in branch diff mode
+  _INITIAL_DIFF=""
+  if [[ "$_BRANCH_DIFF_MODE" == true ]]; then
+    _INITIAL_DIFF="$_LOG_DIR/branch-diff.diff"
+    git diff "$TARGET_BRANCH...$CURRENT_BRANCH" > "$_INITIAL_DIFF"
+  fi
 
   # Call the sub-loop
   SUMMARY=$(
     if [[ "$_DRY_RUN" == true ]]; then SR_DRY_RUN=true; fi
+    if [[ "$_FIX_NITS" == true ]]; then SR_FIX_NITS=true; fi
     if [[ -n "$_REFACTORING_PLAN_FILE" ]]; then SR_REFIX_JSON_HOOK="_sr_inject_refactoring_plan"; fi
+    if [[ -n "$_INITIAL_DIFF" ]]; then SR_INITIAL_DIFF_FILE="$_INITIAL_DIFF"; fi
     _self_review_subloop \
       "$PRE_FIX_STATE" "$_MAX_SUBLOOP" "$_LOG_DIR" "$_ITERATION" "$_REVIEW_JSON"
   )
