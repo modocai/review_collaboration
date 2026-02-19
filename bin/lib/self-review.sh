@@ -279,8 +279,8 @@ EOF
     mkdir -p "$_LOG_DIR"
   fi
 
-  # Snapshot pre-fix state
-  PRE_FIX_STATE=$(_snapshot_worktree)
+  # Empty baseline — treat all current dirty files as "changes to review"
+  PRE_FIX_STATE=$(mktemp)
   _standalone_cleanup() {
     rm -f "$PRE_FIX_STATE"
     if [[ "$_AUTO_LOG_DIR" == true ]] && [[ -d "$_LOG_DIR" ]]; then
