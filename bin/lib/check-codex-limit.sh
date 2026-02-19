@@ -31,8 +31,8 @@ _codex_limit_find_latest_token_count() {
     _dir="$_sessions_dir/$_day_dir"
     [[ -d "$_dir" ]] || continue
 
-    # List .jsonl files in reverse alphabetical order (newest first)
-    _files=$(ls -1r "$_dir"/*.jsonl 2>/dev/null) || continue
+    # List .jsonl files by modification time (newest first)
+    _files=$(ls -1t "$_dir"/*.jsonl 2>/dev/null) || continue
     [[ -n "$_files" ]] || continue
 
     while IFS= read -r _f; do
