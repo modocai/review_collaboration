@@ -209,11 +209,9 @@ fi
 _cleanup() {
   rm -f "${PRE_FIX_STATE:-}"
   if [[ "${_allowed_dirty_stashed:-false}" == true ]]; then
-    if ! git stash pop --index --quiet 2>/dev/null; then
-      if ! git stash pop --quiet 2>/dev/null; then
-        echo "  Error: failed to restore stashed .gitignore/.reviewlooprc edits. Check 'git stash list'." >&2
-        FINAL_STATUS="stash_conflict"
-      fi
+    if ! _unstash_allowlisted; then
+      echo "  Error: failed to restore stashed .gitignore/.reviewlooprc edits. Check 'git stash list'." >&2
+      FINAL_STATUS="stash_conflict"
     fi
     _allowed_dirty_stashed=false
   fi
@@ -314,16 +312,8 @@ EOF
   # before snapshotting so they are excluded from Claude's commit even if
   # Claude happens to modify the same file.
   _allowed_dirty_stashed=false
-  _allowed_dirty_files=()
-  for _adf in .gitignore .reviewlooprc; do
-    if git diff --name-only | grep -qx "$(printf '%s' "$_adf" | sed 's/[.[\*^$()+?{|]/\\&/g')" \
-    || git diff --cached --name-only | grep -qx "$(printf '%s' "$_adf" | sed 's/[.[\*^$()+?{|]/\\&/g')" \
-    || git ls-files --others --exclude-standard | grep -qx "$(printf '%s' "$_adf" | sed 's/[.[\*^$()+?{|]/\\&/g')"; then
-      _allowed_dirty_files+=("$_adf")
-    fi
-  done
-  if [[ ${#_allowed_dirty_files[@]} -gt 0 ]]; then
-    git stash push --quiet --include-untracked -- "${_allowed_dirty_files[@]}" 2>/dev/null && _allowed_dirty_stashed=true
+  if _stash_allowlisted .gitignore .reviewlooprc; then
+    _allowed_dirty_stashed=true
   fi
 
   # ── Snapshot pre-fix working tree state ──────────────────────────

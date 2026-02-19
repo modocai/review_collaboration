@@ -39,6 +39,17 @@ if [[ -f "$SCRIPT_DIR/.refactorsuggestrc.example" ]]; then
   echo "Copied .refactorsuggestrc.example"
 fi
 
+# Generate install manifest from SOURCE files (not target directory)
+# This ensures only installer-owned files are tracked, preserving user-added files on reinstall.
+{
+  find "$SCRIPT_DIR/bin" -type f | sed "s|^${SCRIPT_DIR}/||"
+  find "$SCRIPT_DIR/prompts/active" -type f | sed "s|^${SCRIPT_DIR}/||"
+  for _rc in .reviewlooprc.example .refactorsuggestrc.example; do
+    [[ -f "$SCRIPT_DIR/$_rc" ]] && echo "$_rc"
+  done
+} | sort > "$INSTALL_DIR/.install-manifest"
+echo "Generated .install-manifest ($(wc -l < "$INSTALL_DIR/.install-manifest") files)"
+
 # Add .review-loop/ to .gitignore
 GITIGNORE="$TARGET_DIR/.gitignore"
 MARKER="# review-loop (added by installer)"
