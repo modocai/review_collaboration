@@ -62,6 +62,36 @@ _codex_limit_ts_to_iso() {
   fi
 }
 
+# ── Internal: Extract pct/resets from a rate_limits window ───────────
+# $1 = window JSON (primary or secondary object)
+# $2 = current epoch
+# $3 = default pct when window is absent ("0" or "")
+# stdout: "pct resets_iso" (space-separated, resets_iso may be empty)
+_codex_limit_parse_window() {
+  local _win="$1" _now="$2" _default_pct="$3"
+  local _resets _pct
+
+  if [[ -z "$_win" ]]; then
+    printf '%s ' "$_default_pct"
+    return 0
+  fi
+
+  _resets=$(printf '%s' "$_win" | jq -r '.resets_at')
+
+  # Window has expired
+  if [[ "$_resets" != "null" ]] && [[ "$_resets" =~ ^[0-9]+$ ]] && [[ "$_resets" -le "$_now" ]]; then
+    printf '0 '
+    return 0
+  fi
+
+  _pct=$(printf '%s' "$_win" | jq -r '.used_percent | round')
+  if [[ "$_resets" =~ ^[0-9]+$ ]]; then
+    printf '%s %s' "$_pct" "$(_codex_limit_ts_to_iso "$_resets")"
+  else
+    printf '%s ' "$_pct"
+  fi
+}
+
 # ── Public: Get token budget status ──────────────────────────────────
 # Reads the latest token_count event from Codex session logs.
 # stdout: JSON
@@ -78,47 +108,11 @@ _check_codex_token_budget() {
 
   _now=$(date +%s)
 
-  # Extract primary (5-hour) window
   _primary=$(printf '%s' "$_event" | jq -c '.payload.rate_limits.primary // empty' 2>/dev/null)
-  if [[ -n "$_primary" ]]; then
-    _5h_resets=$(printf '%s' "$_primary" | jq -r '.resets_at')
-    if [[ "$_5h_resets" != "null" ]] && [[ "$_5h_resets" =~ ^[0-9]+$ ]] && [[ "$_5h_resets" -le "$_now" ]]; then
-      # Window has reset
-      _5h_pct=0
-      _5h_resets=""
-    else
-      _5h_pct=$(printf '%s' "$_primary" | jq -r '.used_percent | round')
-      if [[ "$_5h_resets" =~ ^[0-9]+$ ]]; then
-        _5h_resets=$(_codex_limit_ts_to_iso "$_5h_resets")
-      else
-        _5h_resets=""
-      fi
-    fi
-  else
-    _5h_pct=0
-    _5h_resets=""
-  fi
+  read -r _5h_pct _5h_resets <<< "$(_codex_limit_parse_window "$_primary" "$_now" "0")"
 
-  # Extract secondary (7-day) window
   _secondary=$(printf '%s' "$_event" | jq -c '.payload.rate_limits.secondary // empty' 2>/dev/null)
-  if [[ -n "$_secondary" ]]; then
-    _7d_resets=$(printf '%s' "$_secondary" | jq -r '.resets_at')
-    if [[ "$_7d_resets" != "null" ]] && [[ "$_7d_resets" =~ ^[0-9]+$ ]] && [[ "$_7d_resets" -le "$_now" ]]; then
-      # Window has reset
-      _7d_pct=0
-      _7d_resets=""
-    else
-      _7d_pct=$(printf '%s' "$_secondary" | jq -r '.used_percent | round')
-      if [[ "$_7d_resets" =~ ^[0-9]+$ ]]; then
-        _7d_resets=$(_codex_limit_ts_to_iso "$_7d_resets")
-      else
-        _7d_resets=""
-      fi
-    fi
-  else
-    _7d_pct=""
-    _7d_resets=""
-  fi
+  read -r _7d_pct _7d_resets <<< "$(_codex_limit_parse_window "$_secondary" "$_now" "")"
 
   jq -n -c \
     --argjson five_pct "$_5h_pct" \
