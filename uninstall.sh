@@ -92,28 +92,6 @@ if [[ -d "$TARGET_DIR/.review-loop" ]]; then
   rmdir "$_install_dir" 2>/dev/null && echo "Removed empty .review-loop/" || true
 fi
 
-# Remove legacy install layout (pre-.review-loop/ consolidation)
-_legacy_found=false
-if [[ -f "$TARGET_DIR/bin/review-loop.sh" ]]; then
-  _legacy_found=true
-  rm "$TARGET_DIR/bin/review-loop.sh"
-  echo "Removed bin/review-loop.sh"
-  rmdir "$TARGET_DIR/bin" 2>/dev/null && echo "Removed empty bin/" || true
-fi
-for _pfile in codex-review.prompt.md claude-fix.prompt.md claude-fix-execute.prompt.md claude-self-review.prompt.md; do
-  if [[ -f "$TARGET_DIR/prompts/active/$_pfile" ]]; then
-    _legacy_found=true
-    rm "$TARGET_DIR/prompts/active/$_pfile"
-    echo "Removed prompts/active/$_pfile"
-  fi
-done
-rmdir "$TARGET_DIR/prompts/active" 2>/dev/null && echo "Removed empty prompts/active/" || true
-rmdir "$TARGET_DIR/prompts" 2>/dev/null && echo "Removed empty prompts/" || true
-if [[ "$_legacy_found" == true ]] && [[ -f "$TARGET_DIR/.reviewlooprc.example" ]]; then
-  rm "$TARGET_DIR/.reviewlooprc.example"
-  echo "Removed legacy .reviewlooprc.example"
-fi
-
 # Clean up .gitignore entries
 GITIGNORE="$TARGET_DIR/.gitignore"
 remove_gitignore_block "# review-loop (added by installer)" '^\\.review-loop/$' "review-loop entries"
