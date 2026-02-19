@@ -152,12 +152,13 @@ fi
 CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 
 # ── Clean working tree check ────────────────────────────────────────
-# Allow .gitignore/.reviewlooprc to be dirty — the installer modifies .gitignore
-# and the user may have an untracked .reviewlooprc.  Pre-existing dirty files
-# are snapshot-ed before each fix and excluded from commits (see step h).
-_dirty_non_gitignore=$(git diff --name-only | grep -v -E '^(\.gitignore|\.reviewlooprc)$' || true)
-_untracked_non_gitignore=$(git ls-files --others --exclude-standard | grep -v -E '^(\.gitignore|\.reviewlooprc)$' || true)
-_staged_non_gitignore=$(git diff --cached --name-only | grep -v -E '^(\.gitignore|\.reviewlooprc)$' || true)
+# Allow .gitignore/.reviewlooprc/.refactorsuggestrc to be dirty — the installer
+# modifies .gitignore, and the user may have an untracked .reviewlooprc or
+# .refactorsuggestrc.  Pre-existing dirty files are snapshot-ed before each fix
+# and excluded from commits (see step h).
+_dirty_non_gitignore=$(git diff --name-only | grep -v -E '^(\.gitignore|\.reviewlooprc|\.refactorsuggestrc)$' || true)
+_untracked_non_gitignore=$(git ls-files --others --exclude-standard | grep -v -E '^(\.gitignore|\.reviewlooprc|\.refactorsuggestrc)$' || true)
+_staged_non_gitignore=$(git diff --cached --name-only | grep -v -E '^(\.gitignore|\.reviewlooprc|\.refactorsuggestrc)$' || true)
 if [[ "$DRY_RUN" == false ]]; then
   if [[ -n "$_dirty_non_gitignore" ]] || [[ -n "$_staged_non_gitignore" ]] || [[ -n "$_untracked_non_gitignore" ]]; then
     echo "Error: working tree is not clean. Commit or stash your changes before running review-loop."
@@ -308,12 +309,12 @@ EOF
     break
   fi
 
-  # ── Stash allowed dirty files (.gitignore/.reviewlooprc) ─────────
+  # ── Stash allowed dirty files (.gitignore/.reviewlooprc/.refactorsuggestrc)
   # These files may be dirty from the installer or user edits.  Stash them
   # before snapshotting so they are excluded from Claude's commit even if
   # Claude happens to modify the same file.
   _allowed_dirty_stashed=false
-  if _stash_allowlisted .gitignore .reviewlooprc; then
+  if _stash_allowlisted .gitignore .reviewlooprc .refactorsuggestrc; then
     _allowed_dirty_stashed=true
   fi
 
