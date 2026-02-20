@@ -26,7 +26,7 @@ _setup_temp_repo() {
   echo "initial" > README.md
   git add README.md
   git commit --quiet -m "initial commit"
-  git branch develop
+  git branch develop 2>/dev/null || true
 
   # Copy bin/ from the real repo so SCRIPT_DIR resolves inside temp repo
   cp -R "$BATS_TEST_DIRNAME/../bin" "$TEMP_REPO/bin"
