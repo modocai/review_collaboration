@@ -8,9 +8,7 @@
 #   _check_claude_token_budget   # → JSON to stdout
 #   _claude_budget_sufficient full && echo "GO" || echo "NO-GO"
 
-if [[ -n "${_CHECK_CLAUDE_LIMIT_SH_LOADED:-}" ]]; then
-  [[ "${BASH_SOURCE[0]}" != "${0}" ]] && return 0 || exit 0
-fi
+[[ -n "${_CHECK_CLAUDE_LIMIT_SH_LOADED:-}" ]] && return 0
 _CHECK_CLAUDE_LIMIT_SH_LOADED=1
 
 # ── Internal: Detect subscription tier ───────────────────────────────
