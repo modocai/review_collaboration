@@ -61,6 +61,10 @@ npm install -g @anthropic-ai/claude-code  # Claude Code CLI
 - [perl](https://www.perl.org/) — used for JSON extraction and deduplication (pre-installed on macOS and most Linux)
 - git
 
+**Development** (for running tests):
+
+- [bats-core](https://github.com/bats-core/bats-core) — Bash Automated Testing System (`brew install bats-core`)
+
 ## Quick Start
 
 ```bash
@@ -340,7 +344,23 @@ git clone --depth 1 https://github.com/modocai/mr-overkill.git /tmp/mr-overkill 
 2. Create a feature branch (`git checkout -b feat/my-feature`)
 3. Commit your changes
 4. Open a Pull Request against `develop`
-5. Run `review-loop.sh -n 3 --dry-run` on your PR branch — **required**. Let Mr. Overkill review your code before a human ever sees it. Even one line of documentation or a comment deserves a review. We eat our own dog food.
+5. Run `bats test/` to verify all tests pass
+6. Run `review-loop.sh -n 3 --dry-run` on your PR branch — **required**. Let Mr. Overkill review your code before a human ever sees it. Even one line of documentation or a comment deserves a review. We eat our own dog food.
+
+## Testing
+
+Tests use [bats-core](https://github.com/bats-core/bats-core) (Bash Automated Testing System).
+
+```bash
+brew install bats-core   # one-time setup
+bats test/               # run all tests
+bats test/refactor-suggest.bats  # run a specific file
+```
+
+Tests are grouped by dependency:
+- **A (Help/Usage)** and **B (Validation)** — no external tools required, always run
+- **C (RC file)** — uses a temporary git repo, no external tools
+- **D (Dry-run integration)** — requires `jq`, `envsubst`, `perl`; auto-skipped if missing
 
 ## License
 
