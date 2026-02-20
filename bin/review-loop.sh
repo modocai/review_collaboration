@@ -161,7 +161,7 @@ CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 _dirty_non_gitignore=$(git diff --name-only | grep -v -E '^(\.gitignore|\.reviewlooprc)$' || true)
 _untracked_non_gitignore=$(git ls-files --others --exclude-standard | grep -v -E '^(\.gitignore|\.reviewlooprc)$' || true)
 _staged_non_gitignore=$(git diff --cached --name-only | grep -v -E '^(\.gitignore|\.reviewlooprc)$' || true)
-if [[ "$DRY_RUN" == false ]] && [[ "$RESUME" == false ]]; then
+if [[ "$DRY_RUN" == false ]]; then
   if [[ -n "$_dirty_non_gitignore" ]] || [[ -n "$_staged_non_gitignore" ]] || [[ -n "$_untracked_non_gitignore" ]]; then
     echo "Error: working tree is not clean. Commit or stash your changes before running review-loop."
     echo ""
@@ -178,6 +178,7 @@ mkdir -p "$LOG_DIR"
 # Remove stale logs from previous runs so the summary only reflects this execution
 if [[ "$RESUME" == false ]]; then
   rm -f "$LOG_DIR"/review-*.json "$LOG_DIR"/fix-*.md "$LOG_DIR"/opinion-*.md "$LOG_DIR"/self-review-*.json "$LOG_DIR"/refix-*.md "$LOG_DIR"/refix-opinion-*.md "$LOG_DIR"/summary.md
+  echo "$CURRENT_BRANCH" > "$LOG_DIR/branch.txt"
 fi
 
 export CURRENT_BRANCH TARGET_BRANCH
@@ -229,6 +230,13 @@ _RESUME_FROM=1
 _REUSE_REVIEW=false
 
 if [[ "$RESUME" == true ]]; then
+  _expected_branch=$(cat "$LOG_DIR/branch.txt" 2>/dev/null || true)
+  if [[ -n "$_expected_branch" ]] && [[ "$CURRENT_BRANCH" != "$_expected_branch" ]]; then
+    echo "Error: resume expects branch '$_expected_branch' but currently on '$CURRENT_BRANCH'."
+    echo "  git checkout $_expected_branch"
+    exit 1
+  fi
+
   _resume_json=$(_resume_detect_state "$LOG_DIR" "fix(ai-review): apply iteration")
   _resume_status=$(printf '%s' "$_resume_json" | jq -r '.status')
   _RESUME_FROM=$(printf '%s' "$_resume_json" | jq -r '.resume_from')
@@ -253,10 +261,6 @@ if [[ "$RESUME" == true ]]; then
       ;;
     resumable)
       echo "Resuming from iteration $_RESUME_FROM (reuse_review=$_REUSE_REVIEW)"
-      if [[ "$_REUSE_REVIEW" == true ]]; then
-        _resume_reset_working_tree
-        echo "  Working tree reset to last committed state."
-      fi
       ;;
   esac
 fi

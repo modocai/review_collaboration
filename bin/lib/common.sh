@@ -273,8 +273,13 @@ _resume_detect_state() {
     # Commit completed → start from next iteration
     printf '{"status":"resumable","resume_from":%d,"reuse_review":false}' $(( _last_i + 1 ))
   else
-    # Commit missing → reuse this iteration's review JSON
-    printf '{"status":"resumable","resume_from":%d,"reuse_review":true}' "$_last_i"
+    # Commit missing → reuse this iteration's review JSON if valid
+    local _review_f="$_log_dir/review-${_last_i}.json"
+    if [[ -f "$_review_f" ]] && _extract_json_from_file "$_review_f" >/dev/null 2>&1; then
+      printf '{"status":"resumable","resume_from":%d,"reuse_review":true}' "$_last_i"
+    else
+      printf '{"status":"resumable","resume_from":%d,"reuse_review":false}' "$_last_i"
+    fi
   fi
 }
 
