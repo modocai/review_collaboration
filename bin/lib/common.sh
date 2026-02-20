@@ -296,8 +296,8 @@ _resume_detect_state() {
 # Reset working tree to last committed state (clean partial edits).
 _resume_reset_working_tree() {
   git reset --quiet HEAD 2>/dev/null || true
-  git checkout -- . 2>/dev/null || true
-  git clean -fd --quiet 2>/dev/null || true
+  git checkout -- "$(git rev-parse --show-toplevel)" 2>/dev/null || true
+  git clean -fd --quiet "$(git rev-parse --show-toplevel)" 2>/dev/null || true
 }
 
 # ── Summary Generation ──────────────────────────────────────────────
