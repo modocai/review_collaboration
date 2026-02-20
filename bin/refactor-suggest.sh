@@ -59,6 +59,13 @@ if [[ -n "$_GIT_ROOT" && -f "$_GIT_ROOT/$REFACTORSUGGESTRC" ]]; then
           *) echo "Error: BUDGET_SCOPE must be 'micro' or 'module', got '$_rc_val'." >&2; exit 1 ;;
         esac
       fi
+      # Validate REVIEW_LOOPS
+      if [[ "$_rc_key" == "REVIEW_LOOPS" ]]; then
+        if ! [[ "$_rc_val" =~ ^[1-9][0-9]*$ ]]; then
+          echo "Error: REVIEW_LOOPS must be a positive integer, got '$_rc_val'." >&2
+          exit 1
+        fi
+      fi
       declare "${_rc_key}=${_rc_val}"
     else
       echo "Warning: ignoring unrecognised .refactorsuggestrc line: $_rc_line" >&2

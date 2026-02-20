@@ -203,6 +203,11 @@ _claude_budget_sufficient() {
   _budget_json="${2:-$(_check_claude_token_budget)}"
   _pct=$(printf '%s' "$_budget_json" | jq -r '.five_hour_used_pct')
 
+  if [[ "$_pct" == "null" ]]; then
+    echo "Notice: no budget data — assuming OK (first run or stale logs)" >&2
+    return 0
+  fi
+
   if [[ "$_pct" -lt "$_threshold" ]]; then
     return 0
   else
