@@ -28,13 +28,13 @@ _classify_cli_error() {
   _text=$(printf 'exit=%s\n%s' "$_exit_code" "$_head" | tr '[:upper:]' '[:lower:]')
 
   # Transient patterns (rate limits, capacity, temporary errors)
-  if printf '%s' "$_text" | grep -qiE 'rate.limit|too many requests|429|overloaded|529|503|capacity|token.*limit|quota.*exceeded|temporarily unavailable'; then
+  if printf '%s' "$_text" | grep -qiE 'rate.limit|too many requests|(^|[^0-9])429([^0-9]|$)|overloaded|(^|[^0-9])529([^0-9]|$)|(^|[^0-9])503([^0-9]|$)|capacity|token.*limit|quota.*exceeded|temporarily unavailable'; then
     printf 'transient'
     return 0
   fi
 
   # Permanent patterns (auth, permission errors)
-  if printf '%s' "$_text" | grep -qiE 'auth.*fail|unauthorized|403|forbidden|invalid.*api.key|permission denied'; then
+  if printf '%s' "$_text" | grep -qiE 'auth.*fail|unauthorized|(^|[^0-9])403([^0-9]|$)|forbidden|invalid.*api.key|permission denied'; then
     printf 'permanent'
     return 0
   fi
@@ -49,7 +49,7 @@ _seconds_until_iso() {
   local _iso="$1" _target_epoch _now_epoch _diff
 
   # Convert ISO timestamp to epoch
-  if date -v-1d +%s &>/dev/null 2>&1; then
+  if date -v-1d +%s &>/dev/null; then
     # macOS/BSD date — strip fractional seconds and timezone suffix for -jf
     # Use -u to interpret input as UTC (API timestamps are always UTC)
     local _clean
