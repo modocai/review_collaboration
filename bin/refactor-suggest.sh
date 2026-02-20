@@ -167,6 +167,12 @@ if ! git rev-parse --verify "$TARGET_BRANCH" &>/dev/null; then
   exit 1
 fi
 
+# ── Resume: reset partial edits from interrupted run ─────────────
+if [[ "$RESUME" == true ]] && [[ "$DRY_RUN" == false ]]; then
+  echo "Resetting partial edits from interrupted run..."
+  _resume_reset_working_tree
+fi
+
 # Clean working tree check (only when applying fixes)
 if [[ "$DRY_RUN" == false ]]; then
   _dirty=$(git diff --name-only | grep -v -E '^(\.gitignore|\.refactorsuggestrc|\.reviewlooprc)$' || true)
@@ -254,6 +260,7 @@ if [[ "$RESUME" == false ]]; then
     "$LOG_DIR"/self-review-*.json "$LOG_DIR"/refix-*.md "$LOG_DIR"/refix-opinion-*.md \
     "$LOG_DIR"/summary.md "$LOG_DIR"/source-files.txt
   echo "$CURRENT_BRANCH" > "$LOG_DIR/branch.txt"
+  git rev-parse HEAD > "$LOG_DIR/start-commit.txt"
 fi
 
 # Collect source files (respects .gitignore)

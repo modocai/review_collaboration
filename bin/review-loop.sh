@@ -154,6 +154,12 @@ fi
 
 CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 
+# ── Resume: reset partial edits from interrupted run ─────────────
+if [[ "$RESUME" == true ]] && [[ "$DRY_RUN" == false ]]; then
+  echo "Resetting partial edits from interrupted run..."
+  _resume_reset_working_tree
+fi
+
 # ── Clean working tree check ────────────────────────────────────────
 # Allow .gitignore/.reviewlooprc to be dirty — the installer modifies .gitignore
 # and the user may have an untracked .reviewlooprc.  Pre-existing dirty files
@@ -179,6 +185,7 @@ mkdir -p "$LOG_DIR"
 if [[ "$RESUME" == false ]]; then
   rm -f "$LOG_DIR"/review-*.json "$LOG_DIR"/fix-*.md "$LOG_DIR"/opinion-*.md "$LOG_DIR"/self-review-*.json "$LOG_DIR"/refix-*.md "$LOG_DIR"/refix-opinion-*.md "$LOG_DIR"/summary.md
   echo "$CURRENT_BRANCH" > "$LOG_DIR/branch.txt"
+  git rev-parse HEAD > "$LOG_DIR/start-commit.txt"
 fi
 
 export CURRENT_BRANCH TARGET_BRANCH

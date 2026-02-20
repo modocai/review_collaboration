@@ -269,7 +269,17 @@ _resume_detect_state() {
   fi
 
   # 3) Check if commit exists for this iteration
-  if git log --oneline --grep="$_commit_pattern ${_last_i}" HEAD 2>/dev/null | grep -q .; then
+  # Trailing space prevents substring matches (e.g. iteration 1 matching 10).
+  # Scope to commits after run start to avoid matching previous runs.
+  local _log_range="HEAD"
+  if [[ -f "$_log_dir/start-commit.txt" ]]; then
+    local _start_commit
+    _start_commit=$(cat "$_log_dir/start-commit.txt" 2>/dev/null || true)
+    if [[ -n "$_start_commit" ]] && git rev-parse --verify "$_start_commit" &>/dev/null; then
+      _log_range="${_start_commit}..HEAD"
+    fi
+  fi
+  if git log --oneline --grep="$_commit_pattern ${_last_i} " "$_log_range" 2>/dev/null | grep -q .; then
     # Commit completed → start from next iteration
     printf '{"status":"resumable","resume_from":%d,"reuse_review":false}' $(( _last_i + 1 ))
   else
