@@ -155,8 +155,8 @@ fi
 
 CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 
-# ── Resume: reset partial edits from interrupted run ─────────────
-if [[ "$RESUME" == true ]] && [[ "$DRY_RUN" == false ]]; then
+# ── Resume: validate branch & reset partial edits ─────────────────
+if [[ "$RESUME" == true ]]; then
   _early_log_dir="$SCRIPT_DIR/../logs"
   _expected_branch=$(cat "$_early_log_dir/branch.txt" 2>/dev/null || true)
   if [[ -z "$_expected_branch" ]]; then
@@ -178,18 +178,22 @@ if [[ "$RESUME" == true ]] && [[ "$DRY_RUN" == false ]]; then
     esac
   fi
   unset _early_log_dir _expected_branch
-  # Safety: stash any uncommitted changes before destructive reset so the user
-  # can recover them via `git stash list` if they were not from the interrupted run.
-  if ! git diff --quiet || ! git diff --cached --quiet \
-     || [[ -n "$(git ls-files --others --exclude-standard)" ]]; then
-    echo "Stashing uncommitted changes before resume reset..."
-    if ! git stash push --include-untracked -m "review-loop: pre-resume safety stash"; then
-      echo "Error: failed to stash uncommitted changes. Aborting resume to prevent data loss."
-      exit 1
+
+  # Destructive stash/reset only when applying fixes (non-dry-run)
+  if [[ "$DRY_RUN" == false ]]; then
+    # Safety: stash any uncommitted changes before destructive reset so the user
+    # can recover them via `git stash list` if they were not from the interrupted run.
+    if ! git diff --quiet || ! git diff --cached --quiet \
+       || [[ -n "$(git ls-files --others --exclude-standard)" ]]; then
+      echo "Stashing uncommitted changes before resume reset..."
+      if ! git stash push --include-untracked -m "review-loop: pre-resume safety stash"; then
+        echo "Error: failed to stash uncommitted changes. Aborting resume to prevent data loss."
+        exit 1
+      fi
     fi
+    echo "Resetting partial edits from interrupted run..."
+    _resume_reset_working_tree
   fi
-  echo "Resetting partial edits from interrupted run..."
-  _resume_reset_working_tree
 fi
 
 # ── Clean working tree check ────────────────────────────────────────
@@ -264,7 +268,7 @@ _RESUME_FROM=1
 _REUSE_REVIEW=false
 
 if [[ "$RESUME" == true ]]; then
-  # Branch validation already performed in the early resume block (before reset).
+  # Branch validation already performed in the early resume block.
 
   _saved_max_loop=$(cat "$LOG_DIR/max-loop.txt" 2>/dev/null || true)
   if [[ -n "$_saved_max_loop" ]] && [[ "$_MAX_LOOP_EXPLICIT" == false ]]; then

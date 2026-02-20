@@ -168,8 +168,8 @@ if ! git rev-parse --verify "$TARGET_BRANCH" &>/dev/null; then
   exit 1
 fi
 
-# ── Resume: reset partial edits from interrupted run ─────────────
-if [[ "$RESUME" == true ]] && [[ "$DRY_RUN" == false ]]; then
+# ── Resume: validate branch & reset partial edits ─────────────────
+if [[ "$RESUME" == true ]]; then
   _early_log_dir="$SCRIPT_DIR/../logs/refactor"
   _expected_branch=$(cat "$_early_log_dir/branch.txt" 2>/dev/null || true)
   if [[ -z "$_expected_branch" ]]; then
@@ -182,13 +182,6 @@ if [[ "$RESUME" == true ]] && [[ "$DRY_RUN" == false ]]; then
     echo "  git checkout $_expected_branch"
     exit 1
   fi
-  # Guard: previous run must have been on a refactor/* branch for non-dry-run resume
-  if [[ ! "$_expected_branch" =~ ^refactor/ ]]; then
-    echo "Error: previous run used branch '$_expected_branch' (not a refactor/* branch)."
-    echo "  A non-dry-run resume requires a refactor/* branch."
-    echo "  Run without --resume to start a fresh refactoring run."
-    exit 1
-  fi
   # Skip destructive stash/reset if previous run already completed
   if [[ -f "$_early_log_dir/summary.md" ]]; then
     _quick_status=$(sed -n 's/.*\*\*Final status\*\*: //p' "$_early_log_dir/summary.md" | head -1)
@@ -198,19 +191,29 @@ if [[ "$RESUME" == true ]] && [[ "$DRY_RUN" == false ]]; then
         exit 0 ;;
     esac
   fi
-  unset _early_log_dir _expected_branch _current
-  # Safety: stash any uncommitted changes before destructive reset so the user
-  # can recover them via `git stash list` if they were not from the interrupted run.
-  if ! git diff --quiet || ! git diff --cached --quiet \
-     || [[ -n "$(git ls-files --others --exclude-standard)" ]]; then
-    echo "Stashing uncommitted changes before resume reset..."
-    if ! git stash push --include-untracked -m "refactor-suggest: pre-resume safety stash"; then
-      echo "Error: failed to stash uncommitted changes. Aborting resume to prevent data loss."
+  # Destructive stash/reset only when applying fixes (non-dry-run)
+  if [[ "$DRY_RUN" == false ]]; then
+    # Guard: previous run must have been on a refactor/* branch for non-dry-run resume
+    if [[ ! "$_expected_branch" =~ ^refactor/ ]]; then
+      echo "Error: previous run used branch '$_expected_branch' (not a refactor/* branch)."
+      echo "  A non-dry-run resume requires a refactor/* branch."
+      echo "  Run without --resume to start a fresh refactoring run."
       exit 1
     fi
+    # Safety: stash any uncommitted changes before destructive reset so the user
+    # can recover them via `git stash list` if they were not from the interrupted run.
+    if ! git diff --quiet || ! git diff --cached --quiet \
+       || [[ -n "$(git ls-files --others --exclude-standard)" ]]; then
+      echo "Stashing uncommitted changes before resume reset..."
+      if ! git stash push --include-untracked -m "refactor-suggest: pre-resume safety stash"; then
+        echo "Error: failed to stash uncommitted changes. Aborting resume to prevent data loss."
+        exit 1
+      fi
+    fi
+    echo "Resetting partial edits from interrupted run..."
+    _resume_reset_working_tree
   fi
-  echo "Resetting partial edits from interrupted run..."
-  _resume_reset_working_tree
+  unset _early_log_dir _expected_branch _current
 fi
 
 # Clean working tree check (only when applying fixes)
@@ -339,7 +342,7 @@ _RESUME_FROM=1
 _REUSE_REVIEW=false
 
 if [[ "$RESUME" == true ]]; then
-  # Branch validation already performed in the early resume block (before reset).
+  # Branch validation already performed in the early resume block.
 
   _saved_scope=$(cat "$LOG_DIR/scope.txt" 2>/dev/null || true)
   if [[ -n "$_saved_scope" ]] && [[ "$SCOPE" != "$_saved_scope" ]]; then
