@@ -168,6 +168,16 @@ if [[ "$RESUME" == true ]] && [[ "$DRY_RUN" == false ]]; then
     exit 1
   fi
   unset _early_log_dir _expected_branch
+  # Safety: stash any uncommitted changes before destructive reset so the user
+  # can recover them via `git stash list` if they were not from the interrupted run.
+  if ! git diff --quiet || ! git diff --cached --quiet \
+     || [[ -n "$(git ls-files --others --exclude-standard)" ]]; then
+    echo "Stashing uncommitted changes before resume reset..."
+    if ! git stash push --include-untracked -m "review-loop: pre-resume safety stash"; then
+      echo "Error: failed to stash uncommitted changes. Aborting resume to prevent data loss."
+      exit 1
+    fi
+  fi
   echo "Resetting partial edits from interrupted run..."
   _resume_reset_working_tree
 fi
