@@ -182,6 +182,16 @@ if [[ "$RESUME" == true ]] && [[ "$DRY_RUN" == false ]]; then
     exit 1
   fi
   unset _early_log_dir _expected_branch _current
+  # Safety: stash any uncommitted changes before destructive reset so the user
+  # can recover them via `git stash list` if they were not from the interrupted run.
+  if ! git diff --quiet || ! git diff --cached --quiet \
+     || [[ -n "$(git ls-files --others --exclude-standard)" ]]; then
+    echo "Stashing uncommitted changes before resume reset..."
+    if ! git stash push --include-untracked -m "refactor-suggest: pre-resume safety stash"; then
+      echo "Error: failed to stash uncommitted changes. Aborting resume to prevent data loss."
+      exit 1
+    fi
+  fi
   echo "Resetting partial edits from interrupted run..."
   _resume_reset_working_tree
 fi
@@ -274,6 +284,7 @@ if [[ "$RESUME" == false ]]; then
     "$LOG_DIR"/summary.md "$LOG_DIR"/source-files.txt
   echo "$CURRENT_BRANCH" > "$LOG_DIR/branch.txt"
   git rev-parse HEAD > "$LOG_DIR/start-commit.txt"
+  echo "$SCOPE" > "$LOG_DIR/scope.txt"
 fi
 
 # Collect source files (respects .gitignore)
@@ -314,6 +325,13 @@ if [[ "$RESUME" == true ]]; then
   if [[ -n "$_expected_branch" ]] && [[ "$CURRENT_BRANCH" != "$_expected_branch" ]]; then
     echo "Error: resume expects branch '$_expected_branch' but currently on '$CURRENT_BRANCH'."
     echo "  git checkout $_expected_branch"
+    exit 1
+  fi
+
+  _saved_scope=$(cat "$LOG_DIR/scope.txt" 2>/dev/null || true)
+  if [[ -n "$_saved_scope" ]] && [[ "$SCOPE" != "$_saved_scope" ]]; then
+    echo "Error: resume expects scope '$_saved_scope' but got '$SCOPE'."
+    echo "  Use: --scope $_saved_scope --resume"
     exit 1
   fi
 
