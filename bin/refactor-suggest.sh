@@ -17,6 +17,7 @@ DRY_RUN=false
 AUTO_APPROVE=false
 CREATE_PR=false
 RESUME=false
+_MAX_LOOP_EXPLICIT=false
 
 # ── Load .refactorsuggestrc (if present) ──────────────────────────────
 REFACTORSUGGESTRC=".refactorsuggestrc"
@@ -109,7 +110,7 @@ while [[ $# -gt 0 ]]; do
       TARGET_BRANCH="$2"; shift 2 ;;
     -n|--max-loop)
       if [[ $# -lt 2 ]]; then echo "Error: '$1' requires an argument."; usage 1; fi
-      MAX_LOOP="$2"; shift 2 ;;
+      MAX_LOOP="$2"; _MAX_LOOP_EXPLICIT=true; shift 2 ;;
     --max-subloop)
       if [[ $# -lt 2 ]]; then echo "Error: '$1' requires an argument."; usage 1; fi
       MAX_SUBLOOP="$2"; shift 2 ;;
@@ -285,6 +286,7 @@ if [[ "$RESUME" == false ]]; then
   echo "$CURRENT_BRANCH" > "$LOG_DIR/branch.txt"
   git rev-parse HEAD > "$LOG_DIR/start-commit.txt"
   echo "$SCOPE" > "$LOG_DIR/scope.txt"
+  echo "$MAX_LOOP" > "$LOG_DIR/max-loop.txt"
 fi
 
 # Collect source files (respects .gitignore)
@@ -335,6 +337,11 @@ if [[ "$RESUME" == true ]]; then
     exit 1
   fi
 
+  _saved_max_loop=$(cat "$LOG_DIR/max-loop.txt" 2>/dev/null || true)
+  if [[ -n "$_saved_max_loop" ]] && [[ "$_MAX_LOOP_EXPLICIT" == false ]]; then
+    MAX_LOOP="$_saved_max_loop"
+  fi
+
   _resume_json=$(_resume_detect_state "$LOG_DIR" "refactor(ai-$SCOPE): apply iteration")
   _resume_status=$(printf '%s' "$_resume_json" | jq -r '.status')
   _RESUME_FROM=$(printf '%s' "$_resume_json" | jq -r '.resume_from')
@@ -361,6 +368,12 @@ if [[ "$RESUME" == true ]]; then
       echo "Resuming from iteration $_RESUME_FROM (reuse_review=$_REUSE_REVIEW)"
       ;;
   esac
+fi
+
+if [[ "$_RESUME_FROM" -gt "$MAX_LOOP" ]]; then
+  echo "Error: resume point ($_RESUME_FROM) exceeds max-loop ($MAX_LOOP)."
+  echo "  Use: --max-loop N --resume (where N >= $_RESUME_FROM)"
+  exit 1
 fi
 
 # ── Loop ──────────────────────────────────────────────────────────────

@@ -15,6 +15,7 @@ MAX_SUBLOOP=4
 DRY_RUN=false
 AUTO_COMMIT=true
 RESUME=false
+_MAX_LOOP_EXPLICIT=false
 
 # ── Load .reviewlooprc (if present) ──────────────────────────────────
 # Project-level config file can override defaults above.
@@ -96,7 +97,7 @@ while [[ $# -gt 0 ]]; do
       TARGET_BRANCH="$2"; shift 2 ;;
     -n|--max-loop)
       if [[ $# -lt 2 ]]; then echo "Error: '$1' requires an argument."; usage 1; fi
-      MAX_LOOP="$2"; shift 2 ;;
+      MAX_LOOP="$2"; _MAX_LOOP_EXPLICIT=true; shift 2 ;;
     --max-subloop)
       if [[ $# -lt 2 ]]; then echo "Error: '$1' requires an argument."; usage 1; fi
       MAX_SUBLOOP="$2"; shift 2 ;;
@@ -112,13 +113,13 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ -z "$MAX_LOOP" ]]; then
+if [[ -z "$MAX_LOOP" ]] && [[ "$RESUME" != true ]]; then
   echo "Error: -n / --max-loop is required."
   echo ""
   usage 1
 fi
 
-if ! [[ "$MAX_LOOP" =~ ^[1-9][0-9]*$ ]]; then
+if [[ -n "$MAX_LOOP" ]] && ! [[ "$MAX_LOOP" =~ ^[1-9][0-9]*$ ]]; then
   echo "Error: --max-loop must be a positive integer, got '$MAX_LOOP'."
   exit 1
 fi
@@ -208,6 +209,7 @@ if [[ "$RESUME" == false ]]; then
   rm -f "$LOG_DIR"/review-*.json "$LOG_DIR"/fix-*.md "$LOG_DIR"/opinion-*.md "$LOG_DIR"/self-review-*.json "$LOG_DIR"/refix-*.md "$LOG_DIR"/refix-opinion-*.md "$LOG_DIR"/summary.md
   echo "$CURRENT_BRANCH" > "$LOG_DIR/branch.txt"
   git rev-parse HEAD > "$LOG_DIR/start-commit.txt"
+  echo "$MAX_LOOP" > "$LOG_DIR/max-loop.txt"
 fi
 
 export CURRENT_BRANCH TARGET_BRANCH
@@ -266,6 +268,11 @@ if [[ "$RESUME" == true ]]; then
     exit 1
   fi
 
+  _saved_max_loop=$(cat "$LOG_DIR/max-loop.txt" 2>/dev/null || true)
+  if [[ -n "$_saved_max_loop" ]] && [[ "$_MAX_LOOP_EXPLICIT" == false ]]; then
+    MAX_LOOP="$_saved_max_loop"
+  fi
+
   _resume_json=$(_resume_detect_state "$LOG_DIR" "fix(ai-review): apply iteration")
   _resume_status=$(printf '%s' "$_resume_json" | jq -r '.status')
   _RESUME_FROM=$(printf '%s' "$_resume_json" | jq -r '.resume_from')
@@ -292,6 +299,18 @@ if [[ "$RESUME" == true ]]; then
       echo "Resuming from iteration $_RESUME_FROM (reuse_review=$_REUSE_REVIEW)"
       ;;
   esac
+fi
+
+if [[ -z "$MAX_LOOP" ]]; then
+  echo "Error: could not determine max-loop (missing logs/max-loop.txt)."
+  echo "  Use: -n / --max-loop to specify."
+  exit 1
+fi
+
+if [[ "$_RESUME_FROM" -gt "$MAX_LOOP" ]]; then
+  echo "Error: resume point ($_RESUME_FROM) exceeds max-loop ($MAX_LOOP)."
+  echo "  Use: --max-loop N --resume (where N >= $_RESUME_FROM)"
+  exit 1
 fi
 
 # ── Loop ──────────────────────────────────────────────────────────────
