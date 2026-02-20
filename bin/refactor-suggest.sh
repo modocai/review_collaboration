@@ -18,6 +18,7 @@ AUTO_APPROVE=false
 CREATE_PR=false
 RESUME=false
 _MAX_LOOP_EXPLICIT=false
+_TARGET_BRANCH_EXPLICIT=false
 
 # ── Load .refactorsuggestrc (if present) ──────────────────────────────
 REFACTORSUGGESTRC=".refactorsuggestrc"
@@ -107,7 +108,7 @@ while [[ $# -gt 0 ]]; do
       SCOPE="$2"; shift 2 ;;
     -t|--target)
       if [[ $# -lt 2 ]]; then echo "Error: '$1' requires an argument."; usage 1; fi
-      TARGET_BRANCH="$2"; shift 2 ;;
+      TARGET_BRANCH="$2"; _TARGET_BRANCH_EXPLICIT=true; shift 2 ;;
     -n|--max-loop)
       if [[ $# -lt 2 ]]; then echo "Error: '$1' requires an argument."; usage 1; fi
       MAX_LOOP="$2"; _MAX_LOOP_EXPLICIT=true; shift 2 ;;
@@ -306,6 +307,7 @@ if [[ "$RESUME" == false ]]; then
   git rev-parse HEAD > "$LOG_DIR/start-commit.txt"
   echo "$SCOPE" > "$LOG_DIR/scope.txt"
   echo "$MAX_LOOP" > "$LOG_DIR/max-loop.txt"
+  echo "$TARGET_BRANCH" > "$LOG_DIR/target-branch.txt"
 fi
 
 # Collect source files (respects .gitignore)
@@ -343,6 +345,14 @@ _REUSE_REVIEW=false
 
 if [[ "$RESUME" == true ]]; then
   # Branch validation already performed in the early resume block.
+
+  _saved_target=$(cat "$LOG_DIR/target-branch.txt" 2>/dev/null || true)
+  if [[ -n "$_saved_target" ]] && [[ "$_TARGET_BRANCH_EXPLICIT" == false ]]; then
+    TARGET_BRANCH="$_saved_target"
+  fi
+  if ! git rev-parse --verify "$TARGET_BRANCH" &>/dev/null; then
+    echo "Error: saved target branch '$TARGET_BRANCH' does not exist." >&2; exit 1
+  fi
 
   _saved_scope=$(cat "$LOG_DIR/scope.txt" 2>/dev/null || true)
   if [[ -n "$_saved_scope" ]] && [[ "$SCOPE" != "$_saved_scope" ]]; then
