@@ -339,12 +339,7 @@ _RESUME_FROM=1
 _REUSE_REVIEW=false
 
 if [[ "$RESUME" == true ]]; then
-  _expected_branch=$(cat "$LOG_DIR/branch.txt" 2>/dev/null || true)
-  if [[ -n "$_expected_branch" ]] && [[ "$CURRENT_BRANCH" != "$_expected_branch" ]]; then
-    echo "Error: resume expects branch '$_expected_branch' but currently on '$CURRENT_BRANCH'."
-    echo "  git checkout $_expected_branch"
-    exit 1
-  fi
+  # Branch validation already performed in the early resume block (before reset).
 
   _saved_scope=$(cat "$LOG_DIR/scope.txt" 2>/dev/null || true)
   if [[ -n "$_saved_scope" ]] && [[ "$SCOPE" != "$_saved_scope" ]]; then
@@ -356,6 +351,9 @@ if [[ "$RESUME" == true ]]; then
   _saved_max_loop=$(cat "$LOG_DIR/max-loop.txt" 2>/dev/null || true)
   if [[ -n "$_saved_max_loop" ]] && [[ "$_MAX_LOOP_EXPLICIT" == false ]]; then
     MAX_LOOP="$_saved_max_loop"
+  fi
+  if [[ -n "$MAX_LOOP" ]] && ! [[ "$MAX_LOOP" =~ ^[1-9][0-9]*$ ]]; then
+    echo "Error: saved max-loop is invalid: '$MAX_LOOP'." >&2; exit 1
   fi
 
   _resume_json=$(_resume_detect_state "$LOG_DIR" "refactor(ai-$SCOPE): apply iteration")

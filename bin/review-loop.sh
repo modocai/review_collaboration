@@ -234,12 +234,6 @@ else
   echo "No open PR detected — PR comments will be skipped."
 fi
 
-echo "═══════════════════════════════════════════════════════"
-echo " Review Loop: $CURRENT_BRANCH → $TARGET_BRANCH"
-echo " Max iterations: $MAX_LOOP | Sub-loops: $MAX_SUBLOOP | Dry-run: $DRY_RUN"
-echo "═══════════════════════════════════════════════════════"
-echo ""
-
 # ── Pre-loop validation ───────────────────────────────────────────────
 if [[ "$DRY_RUN" == false ]] && [[ ! -f "$PROMPTS_DIR/claude-fix-execute.prompt.md" ]]; then
   echo "Error: required prompt not found: $PROMPTS_DIR/claude-fix-execute.prompt.md" >&2
@@ -270,16 +264,14 @@ _RESUME_FROM=1
 _REUSE_REVIEW=false
 
 if [[ "$RESUME" == true ]]; then
-  _expected_branch=$(cat "$LOG_DIR/branch.txt" 2>/dev/null || true)
-  if [[ -n "$_expected_branch" ]] && [[ "$CURRENT_BRANCH" != "$_expected_branch" ]]; then
-    echo "Error: resume expects branch '$_expected_branch' but currently on '$CURRENT_BRANCH'."
-    echo "  git checkout $_expected_branch"
-    exit 1
-  fi
+  # Branch validation already performed in the early resume block (before reset).
 
   _saved_max_loop=$(cat "$LOG_DIR/max-loop.txt" 2>/dev/null || true)
   if [[ -n "$_saved_max_loop" ]] && [[ "$_MAX_LOOP_EXPLICIT" == false ]]; then
     MAX_LOOP="$_saved_max_loop"
+  fi
+  if [[ -n "$MAX_LOOP" ]] && ! [[ "$MAX_LOOP" =~ ^[1-9][0-9]*$ ]]; then
+    echo "Error: saved max-loop is invalid: '$MAX_LOOP'." >&2; exit 1
   fi
 
   _resume_json=$(_resume_detect_state "$LOG_DIR" "fix(ai-review): apply iteration")
@@ -309,6 +301,12 @@ if [[ "$RESUME" == true ]]; then
       ;;
   esac
 fi
+
+echo "═══════════════════════════════════════════════════════"
+echo " Review Loop: $CURRENT_BRANCH → $TARGET_BRANCH"
+echo " Max iterations: $MAX_LOOP | Sub-loops: $MAX_SUBLOOP | Dry-run: $DRY_RUN"
+echo "═══════════════════════════════════════════════════════"
+echo ""
 
 if [[ -z "$MAX_LOOP" ]]; then
   echo "Error: could not determine max-loop (missing logs/max-loop.txt)."
