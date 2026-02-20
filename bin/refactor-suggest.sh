@@ -357,7 +357,12 @@ if [[ "$RESUME" == true ]]; then
   # Branch validation already performed in the early resume block.
 
   _saved_target=$(cat "$LOG_DIR/target-branch.txt" 2>/dev/null || true)
-  if [[ -n "$_saved_target" ]] && [[ "$_TARGET_BRANCH_EXPLICIT" == false ]]; then
+  if [[ -n "$_saved_target" ]] && [[ "$_TARGET_BRANCH_EXPLICIT" == true ]] \
+     && [[ "$TARGET_BRANCH" != "$_saved_target" ]]; then
+    echo "Error: --target '$TARGET_BRANCH' differs from saved target '$_saved_target'." >&2
+    echo "  Remove logs/ directory to start fresh, or omit --target to use the saved value." >&2
+    exit 1
+  elif [[ -n "$_saved_target" ]] && [[ "$_TARGET_BRANCH_EXPLICIT" == false ]]; then
     TARGET_BRANCH="$_saved_target"
   fi
   if ! git rev-parse --verify "$TARGET_BRANCH" &>/dev/null; then

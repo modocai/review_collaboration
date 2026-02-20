@@ -280,8 +280,15 @@ _resume_detect_state() {
     fi
   fi
   if git log --oneline --grep="$_commit_pattern ${_last_i} " "$_log_range" 2>/dev/null | grep -q .; then
-    # Commit completed → start from next iteration
-    printf '{"status":"resumable","resume_from":%d,"reuse_review":false}' $(( _last_i + 1 ))
+    # Commit completed → start from next iteration (or mark completed if past max)
+    local _next=$(( _last_i + 1 ))
+    local _saved_max
+    _saved_max=$(cat "$_log_dir/max-loop.txt" 2>/dev/null || echo "0")
+    if [[ "$_saved_max" =~ ^[1-9][0-9]*$ ]] && [[ "$_next" -gt "$_saved_max" ]]; then
+      printf '{"status":"completed","resume_from":0,"reuse_review":false,"prev_status":"max_iterations_reached"}'
+    else
+      printf '{"status":"resumable","resume_from":%d,"reuse_review":false}' "$_next"
+    fi
   else
     # Commit missing → reuse this iteration's review JSON if valid
     local _review_f="$_log_dir/review-${_last_i}.json"
