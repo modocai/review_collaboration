@@ -137,7 +137,7 @@ _check_codex_token_budget() {
 # $2 = (optional) pre-fetched JSON from _check_codex_token_budget
 # return 0 = go, return 1 = no-go
 _codex_budget_sufficient() {
-  local _scope="${1:-module}" _threshold _budget_json _pct
+  local _scope="${1:-module}" _threshold _budget_json _pct _7d_pct
 
   case "$_scope" in
     micro)  _threshold=90 ;;
@@ -158,6 +158,13 @@ _codex_budget_sufficient() {
   if [[ "$_pct" == "null" ]]; then
     echo "Notice: no budget data — assuming OK (first run or stale logs)" >&2
     return 0
+  fi
+
+  # Check 7-day window first — if exhausted, no point checking 5-hour
+  _7d_pct=$(printf '%s' "$_budget_json" | jq -r '.seven_day_used_pct')
+  if [[ "$_7d_pct" != "null" ]] && [[ "$_7d_pct" -ge 100 ]]; then
+    echo "Budget check failed: 7-day window ${_7d_pct}% used (exhausted)" >&2
+    return 1
   fi
 
   if [[ "$_pct" -lt "$_threshold" ]]; then
@@ -209,11 +216,17 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   echo ""
 
   # Show go/no-go for each scope (reuse _pct to avoid redundant calls)
+  _7d_exhausted=false
+  if [[ "$_weekly_pct" != "null" ]] && [[ "$_weekly_pct" -ge 100 ]]; then
+    _7d_exhausted=true
+  fi
   _thresholds="micro:90 module:75"
   for _entry in $_thresholds; do
     _s="${_entry%%:*}"
     _thr="${_entry##*:}"
-    if [[ "$_pct" == "null" ]]; then
+    if [[ "$_7d_exhausted" == true ]]; then
+      printf '  %-8s NO-GO (7d exhausted)\n' "$_s:"
+    elif [[ "$_pct" == "null" ]]; then
       printf '  %-8s GO    (no data — assuming OK)\n' "$_s:"
     elif [[ "$_pct" -lt "$_thr" ]]; then
       printf '  %-8s GO\n' "$_s:"

@@ -208,6 +208,14 @@ _claude_budget_sufficient() {
     return 0
   fi
 
+  # Check 7-day window first — if exhausted, no point checking 5-hour
+  local _7d_pct
+  _7d_pct=$(printf '%s' "$_budget_json" | jq -r '.seven_day_used_pct')
+  if [[ "$_7d_pct" != "null" ]] && [[ "$_7d_pct" -ge 100 ]]; then
+    echo "Budget check failed: 7-day window ${_7d_pct}% used (exhausted)" >&2
+    return 1
+  fi
+
   if [[ "$_pct" -lt "$_threshold" ]]; then
     return 0
   else
@@ -265,11 +273,17 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   echo ""
 
   # Show go/no-go for each scope (reuse _pct to avoid redundant API calls)
+  _7d_exhausted=false
+  if [[ "$_weekly_pct" != "null" ]] && [[ "$_weekly_pct" -ge 100 ]]; then
+    _7d_exhausted=true
+  fi
   _thresholds="micro:90 module:75"
   for _entry in $_thresholds; do
     _s="${_entry%%:*}"
     _thr="${_entry##*:}"
-    if [[ "$_pct" -lt "$_thr" ]]; then
+    if [[ "$_7d_exhausted" == true ]]; then
+      printf '  %-8s NO-GO (7d exhausted)\n' "$_s:"
+    elif [[ "$_pct" -lt "$_thr" ]]; then
       printf '  %-8s GO\n' "$_s:"
     else
       printf '  %-8s NO-GO\n' "$_s:"
