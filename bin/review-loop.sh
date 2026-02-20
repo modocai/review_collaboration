@@ -156,6 +156,18 @@ CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 
 # ── Resume: reset partial edits from interrupted run ─────────────
 if [[ "$RESUME" == true ]] && [[ "$DRY_RUN" == false ]]; then
+  _early_log_dir="$SCRIPT_DIR/../logs"
+  _expected_branch=$(cat "$_early_log_dir/branch.txt" 2>/dev/null || true)
+  if [[ -z "$_expected_branch" ]]; then
+    echo "Error: no prior run logs found. Cannot resume (missing branch.txt)."
+    exit 1
+  fi
+  if [[ "$CURRENT_BRANCH" != "$_expected_branch" ]]; then
+    echo "Error: resume expects branch '$_expected_branch' but currently on '$CURRENT_BRANCH'."
+    echo "  git checkout $_expected_branch"
+    exit 1
+  fi
+  unset _early_log_dir _expected_branch
   echo "Resetting partial edits from interrupted run..."
   _resume_reset_working_tree
 fi
