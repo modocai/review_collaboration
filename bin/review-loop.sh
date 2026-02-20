@@ -168,6 +168,15 @@ if [[ "$RESUME" == true ]] && [[ "$DRY_RUN" == false ]]; then
     echo "  git checkout $_expected_branch"
     exit 1
   fi
+  # Skip destructive stash/reset if previous run already completed
+  if [[ -f "$_early_log_dir/summary.md" ]]; then
+    _quick_status=$(sed -n 's/.*\*\*Final status\*\*: //p' "$_early_log_dir/summary.md" | head -1)
+    case "$_quick_status" in
+      all_clear|no_diff|dry_run|max_iterations_reached)
+        echo "Previous run already completed (status: $_quick_status). Nothing to resume."
+        exit 0 ;;
+    esac
+  fi
   unset _early_log_dir _expected_branch
   # Safety: stash any uncommitted changes before destructive reset so the user
   # can recover them via `git stash list` if they were not from the interrupted run.
