@@ -61,6 +61,10 @@ npm install -g @anthropic-ai/claude-code  # Claude Code CLI
 - [perl](https://www.perl.org/) — used for JSON extraction and deduplication (pre-installed on macOS and most Linux)
 - git
 
+**Development** (for running tests):
+
+- [bats-core](https://github.com/bats-core/bats-core) — Bash Automated Testing System (`brew install bats-core`)
+
 ## Quick Start
 
 ```bash
@@ -113,6 +117,8 @@ Options:
   --no-dry-run             Force fixes even if .refactorsuggestrc sets DRY_RUN=true
   --auto-approve           Skip interactive confirmation for layer/full scope
   --create-pr              Create a draft PR after completing all iterations
+  --with-review            Run review-loop after PR creation (default: 4 iterations)
+  --with-review-loops <N>  Set review-loop iteration count (implies --with-review)
   -V, --version            Show version
   -h, --help               Show this help message
 
@@ -121,6 +127,8 @@ Examples:
   refactor-suggest.sh --scope module -n 2 --dry-run   # analyze module duplication
   refactor-suggest.sh --scope layer -n 1 --auto-approve  # cross-cutting concerns
   refactor-suggest.sh --scope full -n 1 --create-pr   # architecture redesign + PR
+  refactor-suggest.sh --scope micro -n 2 --with-review          # refactor + auto review
+  refactor-suggest.sh --scope module -n 3 --with-review-loops 6 # custom review iterations
 ```
 
 ### Scopes
@@ -143,6 +151,7 @@ Examples:
 6. Auto-commit & push to refactoring branch
 7. Repeat until clean or max iterations reached
 8. (--create-pr) Create draft PR
+9. (--with-review) Run review-loop on the new PR
 ```
 
 Recommended workflow: start with `--dry-run` to review findings, then re-run without it to apply.
@@ -178,6 +187,8 @@ MAX_SUBLOOP=4
 DRY_RUN=true
 AUTO_APPROVE=false
 CREATE_PR=false
+WITH_REVIEW=false
+REVIEW_LOOPS=4
 PROMPTS_DIR="./custom-prompts"
 ```
 
@@ -333,7 +344,23 @@ git clone --depth 1 https://github.com/modocai/mr-overkill.git /tmp/mr-overkill 
 2. Create a feature branch (`git checkout -b feat/my-feature`)
 3. Commit your changes
 4. Open a Pull Request against `develop`
-5. Run `review-loop.sh -n 3 --dry-run` on your PR branch — **required**. Let Mr. Overkill review your code before a human ever sees it. Even one line of documentation or a comment deserves a review. We eat our own dog food.
+5. Run `bats test/` to verify all tests pass
+6. Run `review-loop.sh -n 3 --dry-run` on your PR branch — **required**. Let Mr. Overkill review your code before a human ever sees it. Even one line of documentation or a comment deserves a review. We eat our own dog food.
+
+## Testing
+
+Tests use [bats-core](https://github.com/bats-core/bats-core) (Bash Automated Testing System).
+
+```bash
+brew install bats-core   # one-time setup
+bats test/               # run all tests
+bats test/refactor-suggest.bats  # run a specific file
+```
+
+Tests are grouped by dependency:
+- **A (Help/Usage)** and **B (Validation)** — no external tools required, always run
+- **C (RC file)** — uses a temporary git repo, no external tools
+- **D (Dry-run integration)** — requires `jq`, `envsubst`, `perl`; auto-skipped if missing
 
 ## License
 
