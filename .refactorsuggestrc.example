@@ -23,6 +23,12 @@
 # Create a draft PR after completing all iterations (default: false)
 # CREATE_PR=false
 
+# Run review-loop automatically after PR creation (default: false)
+# WITH_REVIEW=false
+
+# Number of review-loop iterations when WITH_REVIEW=true (default: 4)
+# REVIEW_LOOPS=4
+
 # Path to active prompt templates (default: <script_dir>/../prompts/active)
 # PROMPTS_DIR="./custom-prompts"
 
