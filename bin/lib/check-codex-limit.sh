@@ -14,14 +14,14 @@ fi
 _CHECK_CODEX_LIMIT_SH_LOADED=1
 
 # ── Internal: Find latest token_count event ──────────────────────────
-# Scans Codex session logs (newest first) for the most recent
-# token_count event within the last 7 days.
+# Scans all Codex session logs from the last 7 days and returns the
+# token_count event with the highest .timestamp value.
 # stdout: single JSON line (the event)
 _codex_limit_find_latest_token_count() {
   local _sessions_dir="$HOME/.codex/sessions"
   [[ -d "$_sessions_dir" ]] || return 1
 
-  local _offset _day_dir _dir _files _f _result
+  local _offset _day_dir _dir _files _candidates=""
   for _offset in {0..6}; do
     # macOS/BSD vs GNU date
     if date -v-1d +%s &>/dev/null; then
@@ -33,23 +33,25 @@ _codex_limit_find_latest_token_count() {
     _dir="$_sessions_dir/$_day_dir"
     [[ -d "$_dir" ]] || continue
 
-    # List .jsonl files by modification time (newest first)
-    _files=$(ls -1t "$_dir"/*.jsonl 2>/dev/null) || continue
+    _files=$(ls -1 "$_dir"/*.jsonl 2>/dev/null) || continue
     [[ -n "$_files" ]] || continue
 
+    local _f _last
     while IFS= read -r _f; do
       [[ -f "$_f" ]] || continue
-      _result=$(jq -c '
+      _last=$(jq -c '
         select(.type == "event_msg" and .payload.type == "token_count")
       ' "$_f" 2>/dev/null | tail -1)
-      if [[ -n "$_result" ]]; then
-        printf '%s' "$_result"
-        return 0
+      if [[ -n "$_last" ]]; then
+        _candidates="${_candidates}${_last}"$'\n'
       fi
     done < <(printf '%s\n' "$_files")
   done
 
-  return 1
+  [[ -z "$_candidates" ]] && return 1
+
+  # Pick the event with the highest timestamp
+  printf '%s' "$_candidates" | jq -sc 'sort_by(.timestamp) | last'
 }
 
 # ── Internal: Convert Unix timestamp to ISO 8601 ────────────────────
