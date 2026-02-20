@@ -376,3 +376,8 @@ echo "════════════════════════�
 echo " Done. Status: $FINAL_STATUS"
 echo " Summary: $SUMMARY_FILE"
 echo "═══════════════════════════════════════════════════════"
+
+case "$FINAL_STATUS" in
+  all_clear|dry_run|auto_commit_disabled|no_diff) exit 0 ;;
+  *) exit 1 ;;
+esac
