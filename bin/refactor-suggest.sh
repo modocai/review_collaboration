@@ -164,9 +164,11 @@ if ! git rev-parse --is-inside-work-tree &>/dev/null; then
   exit 1
 fi
 
-if ! git rev-parse --verify "$TARGET_BRANCH" &>/dev/null; then
-  echo "Error: target branch '$TARGET_BRANCH' does not exist."
-  exit 1
+if [[ "$RESUME" != true ]]; then
+  if ! git rev-parse --verify "$TARGET_BRANCH" &>/dev/null; then
+    echo "Error: target branch '$TARGET_BRANCH' does not exist."
+    exit 1
+  fi
 fi
 
 # ── Resume: validate branch & reset partial edits ─────────────────
@@ -192,6 +194,14 @@ if [[ "$RESUME" == true ]]; then
         exit 0 ;;
     esac
   fi
+  # Validate resume metadata before any destructive operations
+  _saved_scope=$(cat "$_early_log_dir/scope.txt" 2>/dev/null || true)
+  if [[ -n "$_saved_scope" ]] && [[ "$SCOPE" != "$_saved_scope" ]]; then
+    echo "Error: resume expects scope '$_saved_scope' but got '$SCOPE'."
+    echo "  Use: --scope $_saved_scope --resume"
+    exit 1
+  fi
+
   # Destructive stash/reset only when applying fixes (non-dry-run)
   if [[ "$DRY_RUN" == false ]]; then
     # Guard: previous run must have been on a refactor/* branch for non-dry-run resume
@@ -354,12 +364,7 @@ if [[ "$RESUME" == true ]]; then
     echo "Error: saved target branch '$TARGET_BRANCH' does not exist." >&2; exit 1
   fi
 
-  _saved_scope=$(cat "$LOG_DIR/scope.txt" 2>/dev/null || true)
-  if [[ -n "$_saved_scope" ]] && [[ "$SCOPE" != "$_saved_scope" ]]; then
-    echo "Error: resume expects scope '$_saved_scope' but got '$SCOPE'."
-    echo "  Use: --scope $_saved_scope --resume"
-    exit 1
-  fi
+  # Scope validation already performed in the early resume block.
 
   _saved_max_loop=$(cat "$LOG_DIR/max-loop.txt" 2>/dev/null || true)
   if [[ -n "$_saved_max_loop" ]] && [[ "$_MAX_LOOP_EXPLICIT" == false ]]; then

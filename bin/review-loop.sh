@@ -149,9 +149,11 @@ if ! git rev-parse --is-inside-work-tree &>/dev/null; then
   exit 1
 fi
 
-if ! git rev-parse --verify "$TARGET_BRANCH" &>/dev/null; then
-  echo "Error: target branch '$TARGET_BRANCH' does not exist."
-  exit 1
+if [[ "$RESUME" != true ]]; then
+  if ! git rev-parse --verify "$TARGET_BRANCH" &>/dev/null; then
+    echo "Error: target branch '$TARGET_BRANCH' does not exist."
+    exit 1
+  fi
 fi
 
 CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
