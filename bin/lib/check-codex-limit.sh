@@ -156,8 +156,8 @@ _codex_budget_sufficient() {
   _pct=$(printf '%s' "$_budget_json" | jq -r '.five_hour_used_pct')
 
   if [[ "$_pct" == "null" ]]; then
-    echo "Warning: no budget data available — failing closed" >&2
-    return 1
+    echo "Notice: no budget data — assuming OK (first run or stale logs)" >&2
+    return 0
   fi
 
   if [[ "$_pct" -lt "$_threshold" ]]; then
@@ -214,7 +214,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     _s="${_entry%%:*}"
     _thr="${_entry##*:}"
     if [[ "$_pct" == "null" ]]; then
-      printf '  %-8s NO-GO (no data)\n' "$_s:"
+      printf '  %-8s GO    (no data — assuming OK)\n' "$_s:"
     elif [[ "$_pct" -lt "$_thr" ]]; then
       printf '  %-8s GO\n' "$_s:"
     else
