@@ -496,7 +496,8 @@ if [[ "$WITH_REVIEW" == true ]] && [[ "$DRY_RUN" == false ]] \
     echo " Running review-loop ($REVIEW_LOOPS iterations)..."
     echo "───────────────────────────────────────────────────────"
     if ! "$SCRIPT_DIR/review-loop.sh" -t "$TARGET_BRANCH" -n "$REVIEW_LOOPS"; then
-      echo "  Warning: review-loop exited with non-zero status (non-fatal)."
+      echo "  Warning: review-loop exited with non-zero status."
+      FINAL_STATUS="review_failed"
     fi
   fi
 elif [[ "$WITH_REVIEW" == true ]] && [[ "$DRY_RUN" == true ]]; then
@@ -511,3 +512,7 @@ echo "════════════════════════�
 echo " Done. Status: $FINAL_STATUS"
 echo " Summary: $SUMMARY_FILE"
 echo "═══════════════════════════════════════════════════════"
+
+if [[ "$FINAL_STATUS" == "review_failed" ]]; then
+  exit 1
+fi
