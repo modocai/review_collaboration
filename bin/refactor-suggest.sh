@@ -545,6 +545,7 @@ echo " Done. Status: $FINAL_STATUS"
 echo " Summary: $SUMMARY_FILE"
 echo "═══════════════════════════════════════════════════════"
 
-if [[ "$FINAL_STATUS" == "review_failed" ]]; then
-  exit 1
-fi
+case "$FINAL_STATUS" in
+  all_clear|dry_run|max_iterations_reached) exit 0 ;;
+  *) exit 1 ;;
+esac

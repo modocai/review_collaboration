@@ -28,13 +28,13 @@ _classify_cli_error() {
   _text=$(printf 'exit=%s\n%s' "$_exit_code" "$_head" | tr '[:upper:]' '[:lower:]')
 
   # Transient patterns (rate limits, capacity, temporary errors)
-  if printf '%s' "$_text" | grep -qiE 'rate.limit|too many requests|(^|[^0-9])429([^0-9]|$)|overloaded|(^|[^0-9])529([^0-9]|$)|(^|[^0-9])503([^0-9]|$)|capacity|token.*limit|quota.*exceeded|temporarily unavailable'; then
+  if printf '%s' "$_text" | grep -qE 'rate.limit|too many requests|(^|[^0-9])429([^0-9]|$)|overloaded|(^|[^0-9])529([^0-9]|$)|(^|[^0-9])503([^0-9]|$)|capacity|token.*limit|quota.*exceeded|temporarily unavailable'; then
     printf 'transient'
     return 0
   fi
 
   # Permanent patterns (auth, permission errors)
-  if printf '%s' "$_text" | grep -qiE 'auth.*fail|unauthorized|(^|[^0-9])403([^0-9]|$)|forbidden|invalid.*api.key|permission denied'; then
+  if printf '%s' "$_text" | grep -qE 'auth.*fail|unauthorized|(^|[^0-9])403([^0-9]|$)|forbidden|invalid.*api.key|permission denied'; then
     printf 'permanent'
     return 0
   fi
@@ -86,15 +86,14 @@ _wait_for_budget() {
   local _tool="$1" _scope="${2:-module}" _max_wait="${3:-${RETRY_MAX_WAIT:-600}}"
   local _elapsed=0 _poll_wait=30 _budget_json _resets_at _wait_secs
 
-  # First check — maybe budget is already fine
-  if _wait_for_budget_check "$_tool" "$_scope"; then
+  # Fetch once — reuse for both check and resets_at extraction
+  _budget_json=$(_wait_for_budget_fetch "$_tool")
+
+  if _wait_for_budget_check "$_tool" "$_scope" "$_budget_json"; then
     return 0
   fi
 
   echo "  Budget insufficient for $_tool (scope: $_scope). Waiting for reset..." >&2
-
-  # Try to find resets_at from budget data
-  _budget_json=$(_wait_for_budget_fetch "$_tool")
   _resets_at=$(printf '%s' "$_budget_json" | jq -r '.resets_at // empty' 2>/dev/null)
 
   # If we have a valid resets_at and it's within max_wait, sleep until then
@@ -140,10 +139,10 @@ _wait_for_budget() {
 
 # Internal: run the appropriate budget-sufficient check
 _wait_for_budget_check() {
-  local _tool="$1" _scope="$2"
+  local _tool="$1" _scope="$2" _json="${3:-}"
   case "$_tool" in
-    claude) _claude_budget_sufficient "$_scope" 2>/dev/null ;;
-    codex)  _codex_budget_sufficient "$_scope" 2>/dev/null ;;
+    claude) _claude_budget_sufficient "$_scope" "$_json" 2>/dev/null ;;
+    codex)  _codex_budget_sufficient "$_scope" "$_json" 2>/dev/null ;;
     *)      return 0 ;;
   esac
 }
@@ -172,6 +171,7 @@ _retry_claude_cmd() {
   # Cache stdin for replay on retries
   local _stdin_cache
   _stdin_cache=$(mktemp)
+  trap 'rm -f "$_stdin_cache"' RETURN
   cat > "$_stdin_cache"
 
   while true; do
@@ -225,7 +225,8 @@ _retry_codex_cmd() {
 
   while true; do
     _rc=0
-    "$@" 2>"$_stderr_file" || _rc=$?
+    "$@" < /dev/null 2> >(tee "$_stderr_file" >&2) || _rc=$?
+    wait  # ensure tee in process substitution flushes before reading stderr file
 
     if [[ "$_rc" -eq 0 ]]; then
       return 0
