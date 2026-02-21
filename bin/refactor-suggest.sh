@@ -18,6 +18,9 @@ AUTO_APPROVE=false
 CREATE_PR=false
 WITH_REVIEW=false
 REVIEW_LOOPS=4
+RETRY_MAX_WAIT=600
+RETRY_INITIAL_WAIT=30
+BUDGET_SCOPE="module"
 
 # ── Load .refactorsuggestrc (if present) ──────────────────────────────
 REFACTORSUGGESTRC=".refactorsuggestrc"
@@ -25,7 +28,7 @@ _GIT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || true)
 if [[ -n "$_GIT_ROOT" && -f "$_GIT_ROOT/$REFACTORSUGGESTRC" ]]; then
   while IFS= read -r _rc_line || [[ -n "$_rc_line" ]]; do
     [[ -z "$_rc_line" || "$_rc_line" =~ ^[[:space:]]*# ]] && continue
-    if [[ "$_rc_line" =~ ^[[:space:]]*(SCOPE|TARGET_BRANCH|MAX_LOOP|MAX_SUBLOOP|DRY_RUN|AUTO_APPROVE|CREATE_PR|WITH_REVIEW|REVIEW_LOOPS|PROMPTS_DIR)=[\"\']?([^\"\']*)[\"\']?[[:space:]]*$ ]]; then
+    if [[ "$_rc_line" =~ ^[[:space:]]*(SCOPE|TARGET_BRANCH|MAX_LOOP|MAX_SUBLOOP|DRY_RUN|AUTO_APPROVE|CREATE_PR|WITH_REVIEW|REVIEW_LOOPS|PROMPTS_DIR|RETRY_MAX_WAIT|RETRY_INITIAL_WAIT|BUDGET_SCOPE)=[\"\']?([^\"\']*)[\"\']?[[:space:]]*$ ]]; then
       _rc_val="${BASH_REMATCH[2]}"
       _rc_key="${BASH_REMATCH[1]}"
       _rc_val="${_rc_val%"${_rc_val##*[![:space:]]}"}"
@@ -41,6 +44,27 @@ if [[ -n "$_GIT_ROOT" && -f "$_GIT_ROOT/$REFACTORSUGGESTRC" ]]; then
           micro|module|layer|full) ;;
           *) echo "Error: SCOPE must be one of: micro, module, layer, full. Got '$_rc_val' (in .refactorsuggestrc)." >&2; exit 1 ;;
         esac
+      fi
+      # Validate numeric retry values
+      if [[ "$_rc_key" == "RETRY_MAX_WAIT" || "$_rc_key" == "RETRY_INITIAL_WAIT" ]]; then
+        if ! [[ "$_rc_val" =~ ^[1-9][0-9]*$ ]]; then
+          echo "Error: $_rc_key must be a positive integer, got '$_rc_val'." >&2
+          exit 1
+        fi
+      fi
+      # Validate BUDGET_SCOPE
+      if [[ "$_rc_key" == "BUDGET_SCOPE" ]]; then
+        case "$_rc_val" in
+          micro|module) ;;
+          *) echo "Error: BUDGET_SCOPE must be 'micro' or 'module', got '$_rc_val'." >&2; exit 1 ;;
+        esac
+      fi
+      # Validate REVIEW_LOOPS
+      if [[ "$_rc_key" == "REVIEW_LOOPS" ]]; then
+        if ! [[ "$_rc_val" =~ ^[1-9][0-9]*$ ]]; then
+          echo "Error: REVIEW_LOOPS must be a positive integer, got '$_rc_val'." >&2
+          exit 1
+        fi
       fi
       declare "${_rc_key}=${_rc_val}"
     else
@@ -321,14 +345,22 @@ for (( i=1; i<=MAX_LOOP; i++ )); do
 
   REVIEW_PROMPT=$(envsubst '$CURRENT_BRANCH $TARGET_BRANCH $ITERATION $SOURCE_FILES_PATH' < "$PROMPTS_DIR/$CODEX_PROMPT_FILE")
 
-  if ! codex exec \
-    --sandbox read-only \
-    -o "$REVIEW_FILE" \
-    "$REVIEW_PROMPT" 2>&1; then
-    echo "Error: Codex analysis failed (iteration $i)."
-    FINAL_STATUS="codex_error"
+  # Pre-flight budget check
+  if ! _wait_for_budget "codex" "${BUDGET_SCOPE:-module}"; then
+    echo "Error: Codex budget timeout (iteration $i)."
+    FINAL_STATUS="codex_budget_timeout"
     break
   fi
+
+  CODEX_STDERR=$(mktemp)
+  if ! _retry_codex_cmd "$CODEX_STDERR" "Codex analysis" \
+    codex exec --sandbox read-only -o "$REVIEW_FILE" "$REVIEW_PROMPT"; then
+    echo "Error: Codex analysis failed (iteration $i)."
+    FINAL_STATUS="codex_error"
+    rm -f "$CODEX_STDERR"
+    break
+  fi
+  rm -f "$CODEX_STDERR"
 
   # ── b. Extract JSON from response ────────────────────────────────
   _rc=0
@@ -513,6 +545,7 @@ echo " Done. Status: $FINAL_STATUS"
 echo " Summary: $SUMMARY_FILE"
 echo "═══════════════════════════════════════════════════════"
 
-if [[ "$FINAL_STATUS" == "review_failed" ]]; then
-  exit 1
-fi
+case "$FINAL_STATUS" in
+  all_clear|dry_run|max_iterations_reached) exit 0 ;;
+  *) exit 1 ;;
+esac
