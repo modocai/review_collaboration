@@ -19,6 +19,7 @@ CREATE_PR=false
 RESUME=false
 _MAX_LOOP_EXPLICIT=false
 _TARGET_BRANCH_EXPLICIT=false
+_SCOPE_EXPLICIT=false
 
 # ── Load .refactorsuggestrc (if present) ──────────────────────────────
 REFACTORSUGGESTRC=".refactorsuggestrc"
@@ -105,7 +106,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --scope)
       if [[ $# -lt 2 ]]; then echo "Error: '$1' requires an argument."; usage 1; fi
-      SCOPE="$2"; shift 2 ;;
+      SCOPE="$2"; _SCOPE_EXPLICIT=true; shift 2 ;;
     -t|--target)
       if [[ $# -lt 2 ]]; then echo "Error: '$1' requires an argument."; usage 1; fi
       TARGET_BRANCH="$2"; _TARGET_BRANCH_EXPLICIT=true; shift 2 ;;
@@ -196,10 +197,13 @@ if [[ "$RESUME" == true ]]; then
   fi
   # Validate resume metadata before any destructive operations
   _saved_scope=$(cat "$_early_log_dir/scope.txt" 2>/dev/null || true)
-  if [[ -n "$_saved_scope" ]] && [[ "$SCOPE" != "$_saved_scope" ]]; then
-    echo "Error: resume expects scope '$_saved_scope' but got '$SCOPE'."
-    echo "  Use: --scope $_saved_scope --resume"
+  if [[ -n "$_saved_scope" ]] && [[ "$_SCOPE_EXPLICIT" == true ]] \
+     && [[ "$SCOPE" != "$_saved_scope" ]]; then
+    echo "Error: --scope '$SCOPE' differs from saved scope '$_saved_scope'." >&2
+    echo "  Remove logs/ directory to start fresh, or omit --scope to use the saved value." >&2
     exit 1
+  elif [[ -n "$_saved_scope" ]] && [[ "$_SCOPE_EXPLICIT" == false ]]; then
+    SCOPE="$_saved_scope"
   fi
 
   # Destructive stash/reset only when applying fixes (non-dry-run)
