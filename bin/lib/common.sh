@@ -279,7 +279,7 @@ _resume_detect_state() {
       _log_range="${_start_commit}..HEAD"
     fi
   fi
-  if git log --oneline --grep="$_commit_pattern ${_last_i} " "$_log_range" 2>/dev/null | grep -q .; then
+  if git log --oneline --fixed-strings --grep="$_commit_pattern ${_last_i} " "$_log_range" 2>/dev/null | grep -q .; then
     # Commit completed → start from next iteration (or mark completed if past max)
     local _next=$(( _last_i + 1 ))
     local _saved_max
