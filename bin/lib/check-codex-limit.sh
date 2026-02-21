@@ -89,6 +89,10 @@ _codex_limit_parse_window() {
   fi
 
   _pct=$(printf '%s' "$_win" | jq -r '.used_percent | round')
+  if [[ "$_pct" == "null" || -z "$_pct" ]]; then
+    printf '%s\n' "$_default_pct"
+    return 0
+  fi
   if [[ "$_resets" =~ ^[0-9]+$ ]]; then
     printf '%s %s\n' "$_pct" "$(_codex_limit_ts_to_iso "$_resets")"
   else
