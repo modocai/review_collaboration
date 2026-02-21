@@ -6,6 +6,12 @@
 [[ -n "${_COMMON_SH_LOADED:-}" ]] && return 0
 _COMMON_SH_LOADED=1
 
+# ── Load companion libraries ────────────────────────────────────────
+_COMMON_SH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$_COMMON_SH_DIR/check-claude-limit.sh"
+source "$_COMMON_SH_DIR/check-codex-limit.sh"
+source "$_COMMON_SH_DIR/retry.sh"
+
 # ── Prerequisites ────────────────────────────────────────────────────
 check_cmd() {
   if ! command -v "$1" &>/dev/null; then
@@ -168,23 +174,35 @@ _claude_two_step_fix() {
 
   _prompt=$(REVIEW_JSON="$_rjson" envsubst '$CURRENT_BRANCH $TARGET_BRANCH $REVIEW_JSON' < "$PROMPTS_DIR/$_opinion_prompt")
 
+  # Pre-flight budget check (step 1)
+  if ! _wait_for_budget "claude" "${BUDGET_SCOPE:-module}"; then
+    echo "  Error: Claude budget timeout before $_label opinion." >&2
+    return 1
+  fi
+
   echo "[$(date +%H:%M:%S)] Running Claude $_label (step 1: opinion)..."
-  if ! printf '%s' "$_prompt" | claude -p - \
+  if ! printf '%s' "$_prompt" | _retry_claude_cmd "$_opinion_file" "$_label opinion" \
+    claude -p - \
     --session-id "$_session_id" \
-    --allowedTools "Read,Glob,Grep" \
-    > "$_opinion_file" 2>&1; then
+    --allowedTools "Read,Glob,Grep"; then
     echo "  Error: Claude $_label opinion failed. See $_opinion_file for details."
     return 1
   fi
   echo "  Opinion saved to $_opinion_file"
 
+  # Pre-flight budget check (step 2)
+  if ! _wait_for_budget "claude" "${BUDGET_SCOPE:-module}"; then
+    echo "  Error: Claude budget timeout before $_label execute." >&2
+    return 1
+  fi
+
   echo "[$(date +%H:%M:%S)] Running Claude $_label (step 2: execute)..."
   _exec_prompt=$(cat "$PROMPTS_DIR/$_execute_prompt")
 
-  if ! printf '%s' "$_exec_prompt" | claude -p - \
+  if ! printf '%s' "$_exec_prompt" | _retry_claude_cmd "$_fix_file" "$_label execute" \
+    claude -p - \
     --resume "$_session_id" \
-    --allowedTools "Edit,Read,Glob,Grep,Bash" \
-    > "$_fix_file" 2>&1; then
+    --allowedTools "Edit,Read,Glob,Grep,Bash"; then
     echo "  Error: Claude $_label execute failed. See $_fix_file for details."
     return 1
   fi

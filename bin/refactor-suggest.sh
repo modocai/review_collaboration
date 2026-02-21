@@ -20,6 +20,11 @@ RESUME=false
 _MAX_LOOP_EXPLICIT=false
 _TARGET_BRANCH_EXPLICIT=false
 _SCOPE_EXPLICIT=false
+WITH_REVIEW=false
+REVIEW_LOOPS=4
+RETRY_MAX_WAIT=600
+RETRY_INITIAL_WAIT=30
+BUDGET_SCOPE="module"
 
 # ── Load .refactorsuggestrc (if present) ──────────────────────────────
 REFACTORSUGGESTRC=".refactorsuggestrc"
@@ -27,11 +32,12 @@ _GIT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || true)
 if [[ -n "$_GIT_ROOT" && -f "$_GIT_ROOT/$REFACTORSUGGESTRC" ]]; then
   while IFS= read -r _rc_line || [[ -n "$_rc_line" ]]; do
     [[ -z "$_rc_line" || "$_rc_line" =~ ^[[:space:]]*# ]] && continue
-    if [[ "$_rc_line" =~ ^[[:space:]]*(SCOPE|TARGET_BRANCH|MAX_LOOP|MAX_SUBLOOP|DRY_RUN|AUTO_APPROVE|CREATE_PR|PROMPTS_DIR)=[\"\']?([^\"\']*)[\"\']?[[:space:]]*$ ]]; then
+    if [[ "$_rc_line" =~ ^[[:space:]]*(SCOPE|TARGET_BRANCH|MAX_LOOP|MAX_SUBLOOP|DRY_RUN|AUTO_APPROVE|CREATE_PR|WITH_REVIEW|REVIEW_LOOPS|PROMPTS_DIR|RETRY_MAX_WAIT|RETRY_INITIAL_WAIT|BUDGET_SCOPE)=[\"\']?([^\"\']*)[\"\']?[[:space:]]*$ ]]; then
       _rc_val="${BASH_REMATCH[2]}"
       _rc_key="${BASH_REMATCH[1]}"
       _rc_val="${_rc_val%"${_rc_val##*[![:space:]]}"}"
-      if [[ "$_rc_key" == "DRY_RUN" || "$_rc_key" == "AUTO_APPROVE" || "$_rc_key" == "CREATE_PR" ]]; then
+      if [[ "$_rc_key" == "DRY_RUN" || "$_rc_key" == "AUTO_APPROVE" \
+         || "$_rc_key" == "CREATE_PR" || "$_rc_key" == "WITH_REVIEW" ]]; then
         if [[ "$_rc_val" != "true" && "$_rc_val" != "false" ]]; then
           echo "Error: $_rc_key must be 'true' or 'false', got '$_rc_val'." >&2
           exit 1
@@ -42,6 +48,27 @@ if [[ -n "$_GIT_ROOT" && -f "$_GIT_ROOT/$REFACTORSUGGESTRC" ]]; then
           micro|module|layer|full) ;;
           *) echo "Error: SCOPE must be one of: micro, module, layer, full. Got '$_rc_val' (in .refactorsuggestrc)." >&2; exit 1 ;;
         esac
+      fi
+      # Validate numeric retry values
+      if [[ "$_rc_key" == "RETRY_MAX_WAIT" || "$_rc_key" == "RETRY_INITIAL_WAIT" ]]; then
+        if ! [[ "$_rc_val" =~ ^[1-9][0-9]*$ ]]; then
+          echo "Error: $_rc_key must be a positive integer, got '$_rc_val'." >&2
+          exit 1
+        fi
+      fi
+      # Validate BUDGET_SCOPE
+      if [[ "$_rc_key" == "BUDGET_SCOPE" ]]; then
+        case "$_rc_val" in
+          micro|module) ;;
+          *) echo "Error: BUDGET_SCOPE must be 'micro' or 'module', got '$_rc_val'." >&2; exit 1 ;;
+        esac
+      fi
+      # Validate REVIEW_LOOPS
+      if [[ "$_rc_key" == "REVIEW_LOOPS" ]]; then
+        if ! [[ "$_rc_val" =~ ^[1-9][0-9]*$ ]]; then
+          echo "Error: REVIEW_LOOPS must be a positive integer, got '$_rc_val'." >&2
+          exit 1
+        fi
       fi
       declare "${_rc_key}=${_rc_val}"
     else
@@ -73,6 +100,8 @@ Options:
   --auto-approve           Skip interactive confirmation for layer/full scope
   --create-pr              Create a draft PR after completing all iterations
   --resume                 Resume from a previously interrupted run (reuses existing logs)
+  --with-review            Run review-loop after PR creation (default: 4 iterations)
+  --with-review-loops <N>  Set review-loop iteration count (implies --with-review)
   -V, --version            Show version
   -h, --help               Show this help message
 
@@ -91,12 +120,15 @@ Flow:
   6. Auto-commit & push to refactoring branch
   7. Repeat until clean or max iterations
   8. (--create-pr) Create draft PR
+  9. (--with-review) Run review-loop on the new PR
 
 Examples:
   refactor-suggest.sh --scope micro -n 3
   refactor-suggest.sh --scope module -n 2 --dry-run
   refactor-suggest.sh --scope layer -n 1 --auto-approve
   refactor-suggest.sh --scope full -n 1 --create-pr
+  refactor-suggest.sh --scope micro -n 2 --with-review
+  refactor-suggest.sh --scope module -n 3 --with-review-loops 6
 EOF
   exit "${1:-0}"
 }
@@ -122,6 +154,10 @@ while [[ $# -gt 0 ]]; do
     --auto-approve)    AUTO_APPROVE=true; shift ;;
     --create-pr)       CREATE_PR=true; shift ;;
     --resume)          RESUME=true; shift ;;
+    --with-review)     WITH_REVIEW=true; shift ;;
+    --with-review-loops)
+      if [[ $# -lt 2 ]]; then echo "Error: '$1' requires an argument."; usage 1; fi
+      REVIEW_LOOPS="$2"; WITH_REVIEW=true; shift 2 ;;
     -V|--version) echo "refactor-suggest v$VERSION"; exit 0 ;;
     -h|--help)    usage ;;
     *)            echo "Error: unknown option '$1'"; usage 1 ;;
@@ -139,10 +175,19 @@ if ! [[ "$MAX_SUBLOOP" =~ ^(0|[1-9][0-9]*)$ ]]; then
   exit 1
 fi
 
+if ! [[ "$REVIEW_LOOPS" =~ ^[1-9][0-9]*$ ]]; then
+  echo "Error: --with-review-loops must be a positive integer, got '$REVIEW_LOOPS'."
+  exit 1
+fi
+
 case "$SCOPE" in
   micro|module|layer|full) ;;
   *) echo "Error: --scope must be one of: micro, module, layer, full. Got '$SCOPE'."; exit 1 ;;
 esac
+
+if [[ "$WITH_REVIEW" == true ]]; then
+  CREATE_PR=true
+fi
 
 # ── Prerequisite checks ──────────────────────────────────────────────
 check_cmd git
@@ -336,6 +381,9 @@ echo ""
 echo "═══════════════════════════════════════════════════════"
 echo " Refactor Suggest: scope=$SCOPE | branch=$CURRENT_BRANCH → $TARGET_BRANCH"
 echo " Max iterations: $MAX_LOOP | Sub-loops: $MAX_SUBLOOP | Dry-run: $DRY_RUN"
+if [[ "$WITH_REVIEW" == true ]]; then
+  echo " Review-loop: enabled ($REVIEW_LOOPS iterations)"
+fi
 echo "═══════════════════════════════════════════════════════"
 echo ""
 
@@ -448,14 +496,22 @@ for (( i=1; i<=MAX_LOOP; i++ )); do
 
     REVIEW_PROMPT=$(envsubst '$CURRENT_BRANCH $TARGET_BRANCH $ITERATION $SOURCE_FILES_PATH' < "$PROMPTS_DIR/$CODEX_PROMPT_FILE")
 
-    if ! codex exec \
-      --sandbox read-only \
-      -o "$REVIEW_FILE" \
-      "$REVIEW_PROMPT" 2>&1; then
-      echo "Error: Codex analysis failed (iteration $i)."
-      FINAL_STATUS="codex_error"
+    # Pre-flight budget check
+    if ! _wait_for_budget "codex" "${BUDGET_SCOPE:-module}"; then
+      echo "Error: Codex budget timeout (iteration $i)."
+      FINAL_STATUS="codex_budget_timeout"
       break
     fi
+
+    CODEX_STDERR=$(mktemp)
+    if ! _retry_codex_cmd "$CODEX_STDERR" "Codex analysis" \
+      codex exec --sandbox read-only -o "$REVIEW_FILE" "$REVIEW_PROMPT"; then
+      echo "Error: Codex analysis failed (iteration $i)."
+      FINAL_STATUS="codex_error"
+      rm -f "$CODEX_STDERR"
+      break
+    fi
+    rm -f "$CODEX_STDERR"
   fi
 
   # ── b. Extract JSON from response ────────────────────────────────
@@ -612,6 +668,26 @@ Auto-generated by \`refactor-suggest.sh\`.
   fi
 fi
 
+# ── Run review-loop ───────────────────────────────────────────────────
+if [[ "$WITH_REVIEW" == true ]] && [[ "$DRY_RUN" == false ]] \
+   && [[ "$FINAL_STATUS" == "max_iterations_reached" || "$FINAL_STATUS" == "all_clear" ]]; then
+  _ahead=$(git rev-list --count "${TARGET_BRANCH}..${CURRENT_BRANCH}" 2>/dev/null || echo 0)
+  if [[ "$_ahead" -eq 0 ]]; then
+    echo "  No refactoring commits — skipping review-loop."
+  else
+    echo ""
+    echo "───────────────────────────────────────────────────────"
+    echo " Running review-loop ($REVIEW_LOOPS iterations)..."
+    echo "───────────────────────────────────────────────────────"
+    if ! "$SCRIPT_DIR/review-loop.sh" -t "$TARGET_BRANCH" -n "$REVIEW_LOOPS"; then
+      echo "  Warning: review-loop exited with non-zero status."
+      FINAL_STATUS="review_failed"
+    fi
+  fi
+elif [[ "$WITH_REVIEW" == true ]] && [[ "$DRY_RUN" == true ]]; then
+  echo "  Note: --with-review skipped in dry-run mode (no branch/PR created)."
+fi
+
 # ── Summary ───────────────────────────────────────────────────────────
 SUMMARY_FILE=$(_generate_summary "Refactor Suggest Summary" "- **Scope**: $SCOPE")
 
@@ -620,3 +696,8 @@ echo "════════════════════════�
 echo " Done. Status: $FINAL_STATUS"
 echo " Summary: $SUMMARY_FILE"
 echo "═══════════════════════════════════════════════════════"
+
+case "$FINAL_STATUS" in
+  all_clear|dry_run|max_iterations_reached) exit 0 ;;
+  *) exit 1 ;;
+esac

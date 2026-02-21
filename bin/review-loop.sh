@@ -17,6 +17,9 @@ AUTO_COMMIT=true
 RESUME=false
 _MAX_LOOP_EXPLICIT=false
 _TARGET_BRANCH_EXPLICIT=false
+RETRY_MAX_WAIT=600
+RETRY_INITIAL_WAIT=30
+BUDGET_SCOPE="module"
 
 # ── Load .reviewlooprc (if present) ──────────────────────────────────
 # Project-level config file can override defaults above.
@@ -29,7 +32,7 @@ if [[ -n "$_GIT_ROOT" && -f "$_GIT_ROOT/$REVIEWLOOPRC" ]]; then
     # Skip blank lines and comments
     [[ -z "$_rc_line" || "$_rc_line" =~ ^[[:space:]]*# ]] && continue
     # Match KEY=VALUE (optionally quoted value); reject anything else
-    if [[ "$_rc_line" =~ ^[[:space:]]*(TARGET_BRANCH|MAX_LOOP|MAX_SUBLOOP|DRY_RUN|AUTO_COMMIT|PROMPTS_DIR)=[\"\']?([^\"\']*)[\"\']?[[:space:]]*$ ]]; then
+    if [[ "$_rc_line" =~ ^[[:space:]]*(TARGET_BRANCH|MAX_LOOP|MAX_SUBLOOP|DRY_RUN|AUTO_COMMIT|PROMPTS_DIR|RETRY_MAX_WAIT|RETRY_INITIAL_WAIT|BUDGET_SCOPE)=[\"\']?([^\"\']*)[\"\']?[[:space:]]*$ ]]; then
       _rc_val="${BASH_REMATCH[2]}"
       _rc_key="${BASH_REMATCH[1]}"
       # Trim trailing whitespace from unquoted values
@@ -40,6 +43,20 @@ if [[ -n "$_GIT_ROOT" && -f "$_GIT_ROOT/$REVIEWLOOPRC" ]]; then
           echo "Error: $_rc_key must be 'true' or 'false', got '$_rc_val'." >&2
           exit 1
         fi
+      fi
+      # Validate numeric retry values
+      if [[ "$_rc_key" == "RETRY_MAX_WAIT" || "$_rc_key" == "RETRY_INITIAL_WAIT" ]]; then
+        if ! [[ "$_rc_val" =~ ^[1-9][0-9]*$ ]]; then
+          echo "Error: $_rc_key must be a positive integer, got '$_rc_val'." >&2
+          exit 1
+        fi
+      fi
+      # Validate BUDGET_SCOPE
+      if [[ "$_rc_key" == "BUDGET_SCOPE" ]]; then
+        case "$_rc_val" in
+          micro|module) ;;
+          *) echo "Error: BUDGET_SCOPE must be 'micro' or 'module', got '$_rc_val'." >&2; exit 1 ;;
+        esac
       fi
       declare "${_rc_key}=${_rc_val}"
     else
@@ -200,12 +217,13 @@ if [[ "$RESUME" == true ]]; then
 fi
 
 # ── Clean working tree check ────────────────────────────────────────
-# Allow .gitignore/.reviewlooprc to be dirty — the installer modifies .gitignore
-# and the user may have an untracked .reviewlooprc.  Pre-existing dirty files
-# are snapshot-ed before each fix and excluded from commits (see step h).
-_dirty_non_gitignore=$(git diff --name-only | grep -v -E '^(\.gitignore|\.reviewlooprc)$' || true)
-_untracked_non_gitignore=$(git ls-files --others --exclude-standard | grep -v -E '^(\.gitignore|\.reviewlooprc)$' || true)
-_staged_non_gitignore=$(git diff --cached --name-only | grep -v -E '^(\.gitignore|\.reviewlooprc)$' || true)
+# Allow .gitignore/.reviewlooprc/.refactorsuggestrc to be dirty — the installer
+# modifies .gitignore, and the user may have an untracked .reviewlooprc or
+# .refactorsuggestrc.  Pre-existing dirty files are snapshot-ed before each fix
+# and excluded from commits (see step h).
+_dirty_non_gitignore=$(git diff --name-only | grep -v -E '^(\.gitignore|\.reviewlooprc|\.refactorsuggestrc)$' || true)
+_untracked_non_gitignore=$(git ls-files --others --exclude-standard | grep -v -E '^(\.gitignore|\.reviewlooprc|\.refactorsuggestrc)$' || true)
+_staged_non_gitignore=$(git diff --cached --name-only | grep -v -E '^(\.gitignore|\.reviewlooprc|\.refactorsuggestrc)$' || true)
 if [[ "$DRY_RUN" == false ]]; then
   if [[ -n "$_dirty_non_gitignore" ]] || [[ -n "$_staged_non_gitignore" ]] || [[ -n "$_untracked_non_gitignore" ]]; then
     echo "Error: working tree is not clean. Commit or stash your changes before running review-loop."
@@ -376,14 +394,22 @@ for (( i=1; i<=MAX_LOOP; i++ )); do
 
     REVIEW_PROMPT=$(envsubst '$CURRENT_BRANCH $TARGET_BRANCH $ITERATION' < "$PROMPTS_DIR/codex-review.prompt.md")
 
-    if ! codex exec \
-      --sandbox read-only \
-      -o "$REVIEW_FILE" \
-      "$REVIEW_PROMPT" 2>&1; then
-      echo "Error: Codex review failed (iteration $i). Skipping this iteration."
-      FINAL_STATUS="codex_error"
+    # Pre-flight budget check
+    if ! _wait_for_budget "codex" "${BUDGET_SCOPE:-module}"; then
+      echo "Error: Codex budget timeout (iteration $i)."
+      FINAL_STATUS="codex_budget_timeout"
       break
     fi
+
+    CODEX_STDERR=$(mktemp)
+    if ! _retry_codex_cmd "$CODEX_STDERR" "Codex review" \
+      codex exec --sandbox read-only -o "$REVIEW_FILE" "$REVIEW_PROMPT"; then
+      echo "Error: Codex review failed (iteration $i). Skipping this iteration."
+      FINAL_STATUS="codex_error"
+      rm -f "$CODEX_STDERR"
+      break
+    fi
+    rm -f "$CODEX_STDERR"
   fi
 
   # ── d. Extract JSON from response ────────────────────────────────
@@ -442,12 +468,12 @@ EOF
     break
   fi
 
-  # ── Stash allowed dirty files (.gitignore/.reviewlooprc) ─────────
+  # ── Stash allowed dirty files (.gitignore/.reviewlooprc/.refactorsuggestrc)
   # These files may be dirty from the installer or user edits.  Stash them
   # before snapshotting so they are excluded from Claude's commit even if
   # Claude happens to modify the same file.
   _allowed_dirty_stashed=false
-  if _stash_allowlisted .gitignore .reviewlooprc; then
+  if _stash_allowlisted .gitignore .reviewlooprc .refactorsuggestrc; then
     _allowed_dirty_stashed=true
   fi
 
@@ -509,3 +535,8 @@ echo "════════════════════════�
 echo " Done. Status: $FINAL_STATUS"
 echo " Summary: $SUMMARY_FILE"
 echo "═══════════════════════════════════════════════════════"
+
+case "$FINAL_STATUS" in
+  all_clear|dry_run|auto_commit_disabled|no_diff|max_iterations_reached) exit 0 ;;
+  *) exit 1 ;;
+esac

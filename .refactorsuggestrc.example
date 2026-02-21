@@ -23,5 +23,21 @@
 # Create a draft PR after completing all iterations (default: false)
 # CREATE_PR=false
 
+# Run review-loop automatically after PR creation (default: false)
+# WITH_REVIEW=false
+
+# Number of review-loop iterations when WITH_REVIEW=true (default: 4)
+# REVIEW_LOOPS=4
+
 # Path to active prompt templates (default: <script_dir>/../prompts/active)
 # PROMPTS_DIR="./custom-prompts"
+
+# ── Retry / Rate-Limit Settings ──────────────────────────────────────
+# Max total wait (seconds) for a single CLI call to recover from rate limits (default: 600)
+# RETRY_MAX_WAIT=600
+
+# Initial backoff delay (seconds); doubles each retry, capped at 300s (default: 30)
+# RETRY_INITIAL_WAIT=30
+
+# Pre-flight budget check scope: micro (<90%) or module (<75%) (default: module)
+# BUDGET_SCOPE="module"

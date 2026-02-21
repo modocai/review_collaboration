@@ -132,10 +132,16 @@ GUIDELINES
 
     _self_review_prompt=$(envsubst '$CURRENT_BRANCH $TARGET_BRANCH $ITERATION $REVIEW_JSON $DIFF_FILE $EXTRA_REVIEW_GUIDELINES' < "$PROMPTS_DIR/claude-self-review.prompt.md")
 
+    # Pre-flight budget check
+    if ! _wait_for_budget "claude" "${BUDGET_SCOPE:-module}"; then
+      echo "  Warning: Claude budget timeout before self-review." >&2
+      break
+    fi
+
     # Claude self-review — tool access for git diff, file reading, etc.
-    if ! printf '%s' "$_self_review_prompt" | claude -p - \
-      --allowedTools "Read,Glob,Grep" \
-      > "$_self_review_file" 2>&1; then
+    if ! printf '%s' "$_self_review_prompt" | _retry_claude_cmd "$_self_review_file" "self-review" \
+      claude -p - \
+      --allowedTools "Read,Glob,Grep"; then
       echo "  Warning: self-review failed (sub-iteration $_j). Continuing with current fixes." >&2
       _summary="${_summary}Sub-iteration $_j: self-review failed\n"
       break
