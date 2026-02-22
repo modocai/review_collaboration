@@ -192,7 +192,7 @@ if [[ "$RESUME" == true ]]; then
   if [[ -f "$_early_log_dir/summary.md" ]]; then
     _quick_status=$(sed -n 's/.*\*\*Final status\*\*: //p' "$_early_log_dir/summary.md" | head -1)
     case "$_quick_status" in
-      all_clear|no_diff|dry_run|max_iterations_reached)
+      all_clear|no_diff|dry_run|max_iterations_reached|auto_commit_disabled)
         echo "Previous run already completed (status: $_quick_status). Nothing to resume."
         exit 0 ;;
     esac

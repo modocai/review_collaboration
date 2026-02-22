@@ -279,7 +279,7 @@ _resume_detect_state() {
     [[ -z "$_final_status" ]] && _final_status="unknown"
 
     case "$_final_status" in
-      all_clear|no_diff|dry_run|max_iterations_reached)
+      all_clear|no_diff|dry_run|max_iterations_reached|auto_commit_disabled)
         printf '{"status":"completed","resume_from":0,"reuse_review":false,"prev_status":"%s"}' "$_final_status"
         return 0 ;;
     esac
