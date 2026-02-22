@@ -388,7 +388,21 @@ EOF
     unset ITERATION
 
     # Pre-generate diff and append to prompt so Claude doesn't need Bash
-    _initial_diff_content=$(git diff "$TARGET_BRANCH...$CURRENT_BRANCH")
+    if [[ "$_BRANCH_DIFF_MODE" == true ]]; then
+      _initial_diff_content=$(git diff "$TARGET_BRANCH...$CURRENT_BRANCH")
+    else
+      # Dirty-tree: diff of uncommitted changes (including untracked files)
+      local _untracked_tmp; _untracked_tmp=$(mktemp)
+      git ls-files --others --exclude-standard -z > "$_untracked_tmp"
+      if [[ -s "$_untracked_tmp" ]]; then
+        xargs -0 git add --intent-to-add -- < "$_untracked_tmp" 2>/dev/null || true
+      fi
+      _initial_diff_content=$(git diff HEAD)
+      if [[ -s "$_untracked_tmp" ]]; then
+        xargs -0 git reset --quiet -- < "$_untracked_tmp" 2>/dev/null || true
+      fi
+      rm -f "$_untracked_tmp"
+    fi
     _initial_prompt="${_initial_prompt}
 
 ## Diff
@@ -464,7 +478,7 @@ ${_initial_diff_content}
     if [[ "$_FIX_NITS" == true ]]; then SR_FIX_NITS=true; fi
     if [[ -n "$_REFACTORING_PLAN_FILE" ]]; then SR_REFIX_JSON_HOOK="_sr_inject_refactoring_plan"; fi
     if [[ -n "$_INITIAL_DIFF" ]]; then SR_INITIAL_DIFF_FILE="$_INITIAL_DIFF"; fi
-    if [[ "$_DRY_RUN" != true ]]; then SR_COMMIT_SNAPSHOT="$_COMMIT_SNAPSHOT"; fi
+    if [[ "$_DRY_RUN" != true ]] && [[ "$_BRANCH_DIFF_MODE" == true ]]; then SR_COMMIT_SNAPSHOT="$_COMMIT_SNAPSHOT"; fi
     _self_review_subloop \
       "$PRE_FIX_STATE" "$_MAX_SUBLOOP" "$_LOG_DIR" "$_ITERATION" "$_REVIEW_JSON"
   )
