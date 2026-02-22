@@ -179,7 +179,6 @@ _retry_claude_cmd() {
     cat "$_stdin_cache" | "$@" > "$_output" 2>&1 || _rc=$?
 
     if [[ "$_rc" -eq 0 ]]; then
-      rm -f "$_stdin_cache"
       return 0
     fi
 
@@ -187,13 +186,11 @@ _retry_claude_cmd() {
 
     if [[ "$_class" != "transient" ]]; then
       echo "  [$_label] Non-transient error ($_class, exit=$_rc). Giving up." >&2
-      rm -f "$_stdin_cache"
       return 1
     fi
 
     if [[ "$_elapsed" -ge "$_max_wait" ]]; then
       echo "  [$_label] Retry timeout (${_elapsed}/${_max_wait}s). Giving up." >&2
-      rm -f "$_stdin_cache"
       return 1
     fi
 
