@@ -28,7 +28,7 @@ _classify_cli_error() {
   _text=$(printf 'exit=%s\n%s' "$_exit_code" "$_head" | tr '[:upper:]' '[:lower:]')
 
   # Transient patterns (rate limits, capacity, temporary errors)
-  if printf '%s' "$_text" | grep -qE 'rate.limit|too many requests|(^|[^0-9])429([^0-9]|$)|overloaded|(^|[^0-9])529([^0-9]|$)|(^|[^0-9])50[03]([^0-9]|$)|internal server error|capacity|token.*limit|quota.*exceeded|temporarily unavailable'; then
+  if printf '%s' "$_text" | grep -qE 'rate.limit|too many requests|(^|[^0-9])429([^0-9]|$)|overloaded|(^|[^0-9])529([^0-9]|$)|(^|[^0-9])503([^0-9]|$)|capacity|token.*limit|quota.*exceeded|temporarily unavailable'; then
     printf 'transient'
     return 0
   fi
