@@ -16,6 +16,10 @@ MAX_SUBLOOP=4
 DRY_RUN=false
 AUTO_APPROVE=false
 CREATE_PR=false
+RESUME=false
+_MAX_LOOP_EXPLICIT=false
+_TARGET_BRANCH_EXPLICIT=false
+_SCOPE_EXPLICIT=false
 WITH_REVIEW=false
 REVIEW_LOOPS=4
 RETRY_MAX_WAIT=600
@@ -95,6 +99,7 @@ Options:
   --no-dry-run             Force fixes even if .refactorsuggestrc sets DRY_RUN=true
   --auto-approve           Skip interactive confirmation for layer/full scope
   --create-pr              Create a draft PR after completing all iterations
+  --resume                 Resume from a previously interrupted run (reuses existing logs)
   --with-review            Run review-loop after PR creation (default: 4 iterations)
   --with-review-loops <N>  Set review-loop iteration count (implies --with-review)
   -V, --version            Show version
@@ -133,13 +138,13 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --scope)
       if [[ $# -lt 2 ]]; then echo "Error: '$1' requires an argument."; usage 1; fi
-      SCOPE="$2"; shift 2 ;;
+      SCOPE="$2"; _SCOPE_EXPLICIT=true; shift 2 ;;
     -t|--target)
       if [[ $# -lt 2 ]]; then echo "Error: '$1' requires an argument."; usage 1; fi
-      TARGET_BRANCH="$2"; shift 2 ;;
+      TARGET_BRANCH="$2"; _TARGET_BRANCH_EXPLICIT=true; shift 2 ;;
     -n|--max-loop)
       if [[ $# -lt 2 ]]; then echo "Error: '$1' requires an argument."; usage 1; fi
-      MAX_LOOP="$2"; shift 2 ;;
+      MAX_LOOP="$2"; _MAX_LOOP_EXPLICIT=true; shift 2 ;;
     --max-subloop)
       if [[ $# -lt 2 ]]; then echo "Error: '$1' requires an argument."; usage 1; fi
       MAX_SUBLOOP="$2"; shift 2 ;;
@@ -148,6 +153,7 @@ while [[ $# -gt 0 ]]; do
     --no-dry-run)      DRY_RUN=false; shift ;;
     --auto-approve)    AUTO_APPROVE=true; shift ;;
     --create-pr)       CREATE_PR=true; shift ;;
+    --resume)          RESUME=true; shift ;;
     --with-review)     WITH_REVIEW=true; shift ;;
     --with-review-loops)
       if [[ $# -lt 2 ]]; then echo "Error: '$1' requires an argument."; usage 1; fi
@@ -204,9 +210,70 @@ if ! git rev-parse --is-inside-work-tree &>/dev/null; then
   exit 1
 fi
 
-if ! git rev-parse --verify "$TARGET_BRANCH" &>/dev/null; then
-  echo "Error: target branch '$TARGET_BRANCH' does not exist."
-  exit 1
+if [[ "$RESUME" != true ]]; then
+  if ! git rev-parse --verify "$TARGET_BRANCH" &>/dev/null; then
+    echo "Error: target branch '$TARGET_BRANCH' does not exist."
+    exit 1
+  fi
+fi
+
+# ── Resume: validate branch & reset partial edits ─────────────────
+if [[ "$RESUME" == true ]]; then
+  _early_log_dir="$SCRIPT_DIR/../logs/refactor"
+  _expected_branch=$(cat "$_early_log_dir/branch.txt" 2>/dev/null || true)
+  if [[ -z "$_expected_branch" ]]; then
+    echo "Error: no prior run logs found. Cannot resume (missing branch.txt)."
+    exit 1
+  fi
+  _current=$(git rev-parse --abbrev-ref HEAD)
+  if [[ "$_current" != "$_expected_branch" ]]; then
+    echo "Error: resume expects branch '$_expected_branch' but currently on '$_current'."
+    echo "  git checkout $_expected_branch"
+    exit 1
+  fi
+  # Skip destructive stash/reset if previous run already completed
+  if [[ -f "$_early_log_dir/summary.md" ]]; then
+    _quick_status=$(sed -n 's/.*\*\*Final status\*\*: //p' "$_early_log_dir/summary.md" | head -1)
+    case "$_quick_status" in
+      all_clear|no_diff|dry_run|max_iterations_reached)
+        echo "Previous run already completed (status: $_quick_status). Nothing to resume."
+        exit 0 ;;
+    esac
+  fi
+  # Validate resume metadata before any destructive operations
+  _saved_scope=$(cat "$_early_log_dir/scope.txt" 2>/dev/null || true)
+  if [[ -n "$_saved_scope" ]] && [[ "$_SCOPE_EXPLICIT" == true ]] \
+     && [[ "$SCOPE" != "$_saved_scope" ]]; then
+    echo "Error: --scope '$SCOPE' differs from saved scope '$_saved_scope'." >&2
+    echo "  Remove logs/ directory to start fresh, or omit --scope to use the saved value." >&2
+    exit 1
+  elif [[ -n "$_saved_scope" ]] && [[ "$_SCOPE_EXPLICIT" == false ]]; then
+    SCOPE="$_saved_scope"
+  fi
+
+  # Destructive stash/reset only when applying fixes (non-dry-run)
+  if [[ "$DRY_RUN" == false ]]; then
+    # Guard: previous run must have been on a refactor/* branch for non-dry-run resume
+    if [[ ! "$_expected_branch" =~ ^refactor/ ]]; then
+      echo "Error: previous run used branch '$_expected_branch' (not a refactor/* branch)."
+      echo "  A non-dry-run resume requires a refactor/* branch."
+      echo "  Run without --resume to start a fresh refactoring run."
+      exit 1
+    fi
+    # Safety: stash any uncommitted changes before destructive reset so the user
+    # can recover them via `git stash list` if they were not from the interrupted run.
+    if ! git diff --quiet || ! git diff --cached --quiet \
+       || [[ -n "$(git ls-files --others --exclude-standard)" ]]; then
+      echo "Stashing uncommitted changes before resume reset..."
+      if ! git stash push --include-untracked -m "refactor-suggest: pre-resume safety stash"; then
+        echo "Error: failed to stash uncommitted changes. Aborting resume to prevent data loss."
+        exit 1
+      fi
+    fi
+    echo "Resetting partial edits from interrupted run..."
+    _resume_reset_working_tree
+  fi
+  unset _early_log_dir _expected_branch _current
 fi
 
 # Clean working tree check (only when applying fixes)
@@ -254,7 +321,7 @@ fi
 TIMESTAMP=$(date +%Y%m%d-%H%M%S)
 REFACTOR_BRANCH="refactor/${SCOPE}-${TIMESTAMP}"
 
-if [[ "$DRY_RUN" == false ]]; then
+if [[ "$DRY_RUN" == false ]] && [[ "$RESUME" == false ]]; then
   # Stash allowlisted files that may conflict with branch switch
   _stash_rc=0
   _stash_allowlisted .gitignore .refactorsuggestrc .reviewlooprc || _stash_rc=$?
@@ -280,8 +347,10 @@ if [[ "$DRY_RUN" == false ]]; then
   fi
   unset _needs_stash
   CURRENT_BRANCH="$REFACTOR_BRANCH"
-else
+elif [[ "$DRY_RUN" == true ]]; then
   echo "Dry-run mode — staying on $CURRENT_BRANCH"
+elif [[ "$RESUME" == true ]]; then
+  echo "Resume mode — staying on $CURRENT_BRANCH"
 fi
 
 export CURRENT_BRANCH TARGET_BRANCH
@@ -289,9 +358,16 @@ export CURRENT_BRANCH TARGET_BRANCH
 # ── Log directory + source file list ──────────────────────────────────
 LOG_DIR="$SCRIPT_DIR/../logs/refactor"
 mkdir -p "$LOG_DIR"
-rm -f "$LOG_DIR"/review-*.json "$LOG_DIR"/fix-*.md "$LOG_DIR"/opinion-*.md \
-  "$LOG_DIR"/self-review-*.json "$LOG_DIR"/refix-*.md "$LOG_DIR"/refix-opinion-*.md \
-  "$LOG_DIR"/summary.md "$LOG_DIR"/source-files.txt
+if [[ "$RESUME" == false ]]; then
+  rm -f "$LOG_DIR"/review-*.json "$LOG_DIR"/fix-*.md "$LOG_DIR"/opinion-*.md \
+    "$LOG_DIR"/self-review-*.json "$LOG_DIR"/refix-*.md "$LOG_DIR"/refix-opinion-*.md \
+    "$LOG_DIR"/summary.md "$LOG_DIR"/source-files.txt
+  echo "$CURRENT_BRANCH" > "$LOG_DIR/branch.txt"
+  git rev-parse HEAD > "$LOG_DIR/start-commit.txt"
+  echo "$SCOPE" > "$LOG_DIR/scope.txt"
+  echo "$MAX_LOOP" > "$LOG_DIR/max-loop.txt"
+  echo "$TARGET_BRANCH" > "$LOG_DIR/target-branch.txt"
+fi
 
 # Collect source files (respects .gitignore)
 SOURCE_FILES_PATH="$LOG_DIR/source-files.txt"
@@ -325,6 +401,70 @@ _cleanup() {
 }
 trap _cleanup EXIT
 
+# ── Resume detection ──────────────────────────────────────────────────
+_RESUME_FROM=1
+_REUSE_REVIEW=false
+
+if [[ "$RESUME" == true ]]; then
+  # Branch validation already performed in the early resume block.
+
+  _saved_target=$(cat "$LOG_DIR/target-branch.txt" 2>/dev/null || true)
+  if [[ -n "$_saved_target" ]] && [[ "$_TARGET_BRANCH_EXPLICIT" == true ]] \
+     && [[ "$TARGET_BRANCH" != "$_saved_target" ]]; then
+    echo "Error: --target '$TARGET_BRANCH' differs from saved target '$_saved_target'." >&2
+    echo "  Remove logs/ directory to start fresh, or omit --target to use the saved value." >&2
+    exit 1
+  elif [[ -n "$_saved_target" ]] && [[ "$_TARGET_BRANCH_EXPLICIT" == false ]]; then
+    TARGET_BRANCH="$_saved_target"
+  fi
+  if ! git rev-parse --verify "$TARGET_BRANCH" &>/dev/null; then
+    echo "Error: saved target branch '$TARGET_BRANCH' does not exist." >&2; exit 1
+  fi
+
+  # Scope validation already performed in the early resume block.
+
+  _saved_max_loop=$(cat "$LOG_DIR/max-loop.txt" 2>/dev/null || true)
+  if [[ -n "$_saved_max_loop" ]] && [[ "$_MAX_LOOP_EXPLICIT" == false ]]; then
+    MAX_LOOP="$_saved_max_loop"
+  fi
+  if [[ -n "$MAX_LOOP" ]] && ! [[ "$MAX_LOOP" =~ ^[1-9][0-9]*$ ]]; then
+    echo "Error: saved max-loop is invalid: '$MAX_LOOP'." >&2; exit 1
+  fi
+
+  _resume_json=$(_resume_detect_state "$LOG_DIR" "refactor(ai-$SCOPE): apply iteration")
+  _resume_status=$(printf '%s' "$_resume_json" | jq -r '.status')
+  _RESUME_FROM=$(printf '%s' "$_resume_json" | jq -r '.resume_from')
+  _REUSE_REVIEW=$(printf '%s' "$_resume_json" | jq -r '.reuse_review')
+
+  case "$_resume_status" in
+    completed)
+      _prev=$(printf '%s' "$_resume_json" | jq -r '.prev_status')
+      echo "Previous run completed with status: $_prev. Nothing to resume."
+      FINAL_STATUS="$_prev"
+      SUMMARY_FILE=$(_generate_summary "Refactor Suggest Summary" "- **Scope**: $SCOPE")
+      echo ""
+      echo "═══════════════════════════════════════════════════════"
+      echo " Done. Status: $FINAL_STATUS"
+      echo " Summary: $SUMMARY_FILE"
+      echo "═══════════════════════════════════════════════════════"
+      exit 0
+      ;;
+    no_logs)
+      echo "Error: no previous logs found in $LOG_DIR. Nothing to resume."
+      exit 1
+      ;;
+    resumable)
+      echo "Resuming from iteration $_RESUME_FROM (reuse_review=$_REUSE_REVIEW)"
+      ;;
+  esac
+fi
+
+if [[ "$_RESUME_FROM" -gt "$MAX_LOOP" ]]; then
+  echo "Error: resume point ($_RESUME_FROM) exceeds max-loop ($MAX_LOOP)."
+  echo "  Use: --max-loop N --resume (where N >= $_RESUME_FROM)"
+  exit 1
+fi
+
 # ── Loop ──────────────────────────────────────────────────────────────
 FINAL_STATUS="max_iterations_reached"
 
@@ -335,32 +475,55 @@ for (( i=1; i<=MAX_LOOP; i++ )); do
 
   export ITERATION="$i"
 
+  # ── Resume: skip completed iterations ──────────────────────────
+  if [[ "$i" -lt "$_RESUME_FROM" ]]; then
+    echo "  [resume] Skipping iteration $i (already completed)."
+    continue
+  fi
+
   # Refresh source file list (new files may have been committed in previous iterations)
   git ls-files > "$SOURCE_FILES_PATH"
 
   # ── a. Codex analysis ────────────────────────────────────────────
-  echo "[$(date +%H:%M:%S)] Running Codex refactoring analysis (scope: $SCOPE)..."
   REVIEW_FILE="$LOG_DIR/review-${i}.json"
-  rm -f "$REVIEW_FILE"
 
-  REVIEW_PROMPT=$(envsubst '$CURRENT_BRANCH $TARGET_BRANCH $ITERATION $SOURCE_FILES_PATH' < "$PROMPTS_DIR/$CODEX_PROMPT_FILE")
-
-  # Pre-flight budget check
-  if ! _wait_for_budget "codex" "${BUDGET_SCOPE:-module}"; then
-    echo "Error: Codex budget timeout (iteration $i)."
-    FINAL_STATUS="codex_budget_timeout"
-    break
+  # Invalidate review reuse if the diff changed since the review was generated
+  if [[ "$_REUSE_REVIEW" == true ]] && [[ "$i" -eq "$_RESUME_FROM" ]]; then
+    _saved_hash=$(cat "$LOG_DIR/diff-hash-${i}.txt" 2>/dev/null || true)
+    _curr_hash=$(git diff "$TARGET_BRANCH...$CURRENT_BRANCH" | sha256 | cut -d' ' -f1)
+    if [[ -z "$_saved_hash" ]] || [[ "$_saved_hash" != "$_curr_hash" ]]; then
+      echo "  [resume] Diff changed since last review; re-running Codex."
+      _REUSE_REVIEW=false
+    fi
   fi
 
-  CODEX_STDERR=$(mktemp)
-  if ! _retry_codex_cmd "$CODEX_STDERR" "Codex analysis" \
-    codex exec --sandbox read-only -o "$REVIEW_FILE" "$REVIEW_PROMPT"; then
-    echo "Error: Codex analysis failed (iteration $i)."
-    FINAL_STATUS="codex_error"
+  if [[ "$RESUME" == true ]] && [[ "$_REUSE_REVIEW" == true ]] \
+     && [[ "$i" -eq "$_RESUME_FROM" ]] && [[ -f "$REVIEW_FILE" ]]; then
+    echo "  [resume] Reusing saved review: $REVIEW_FILE"
+  else
+    rm -f "$REVIEW_FILE"
+    echo "[$(date +%H:%M:%S)] Running Codex refactoring analysis (scope: $SCOPE)..."
+
+    REVIEW_PROMPT=$(envsubst '$CURRENT_BRANCH $TARGET_BRANCH $ITERATION $SOURCE_FILES_PATH' < "$PROMPTS_DIR/$CODEX_PROMPT_FILE")
+
+    # Pre-flight budget check
+    if ! _wait_for_budget "codex" "${BUDGET_SCOPE:-module}"; then
+      echo "Error: Codex budget timeout (iteration $i)."
+      FINAL_STATUS="codex_budget_timeout"
+      break
+    fi
+
+    CODEX_STDERR=$(mktemp)
+    if ! _retry_codex_cmd "$CODEX_STDERR" "Codex analysis" \
+      codex exec --sandbox read-only -o "$REVIEW_FILE" "$REVIEW_PROMPT"; then
+      echo "Error: Codex analysis failed (iteration $i)."
+      FINAL_STATUS="codex_error"
+      rm -f "$CODEX_STDERR"
+      break
+    fi
     rm -f "$CODEX_STDERR"
-    break
+    git diff "$TARGET_BRANCH...$CURRENT_BRANCH" | sha256 | cut -d' ' -f1 > "$LOG_DIR/diff-hash-${i}.txt"
   fi
-  rm -f "$CODEX_STDERR"
 
   # ── b. Extract JSON from response ────────────────────────────────
   _rc=0
