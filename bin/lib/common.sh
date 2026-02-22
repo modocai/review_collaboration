@@ -20,6 +20,18 @@ check_cmd() {
   fi
 }
 
+# ── SHA-256 hashing (portable) ──────────────────────────────────────
+sha256() {
+  if command -v shasum &>/dev/null; then
+    shasum -a 256
+  elif command -v sha256sum &>/dev/null; then
+    sha256sum
+  else
+    echo "Error: neither 'shasum' nor 'sha256sum' found." >&2
+    exit 1
+  fi
+}
+
 # ── gh CLI detection ─────────────────────────────────────────────────
 HAS_GH=true
 if ! command -v gh &>/dev/null; then
