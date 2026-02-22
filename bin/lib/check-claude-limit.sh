@@ -201,12 +201,7 @@ _claude_budget_sufficient() {
   _budget_json="${2:-$(_check_claude_token_budget)}"
   _pct=$(printf '%s' "$_budget_json" | jq -r '.five_hour_used_pct')
 
-  if [[ "$_pct" == "null" ]]; then
-    echo "Notice: no budget data — assuming OK (first run or stale logs)" >&2
-    return 0
-  fi
-
-  # Check 7-day window — exhausted=always NO-GO, >=90%=module+ NO-GO
+  # Check 7-day window first — exhausted=always NO-GO, >=90%=module+ NO-GO
   local _7d_pct
   _7d_pct=$(printf '%s' "$_budget_json" | jq -r '.seven_day_used_pct')
   if [[ "$_7d_pct" != "null" ]]; then
@@ -218,6 +213,11 @@ _claude_budget_sufficient() {
       echo "Budget check failed: 7-day window ${_7d_pct}% used (threshold for '$_scope' requires <90%)" >&2
       return 1
     fi
+  fi
+
+  if [[ "$_pct" == "null" ]]; then
+    echo "Notice: no budget data — assuming OK (first run or stale logs)" >&2
+    return 0
   fi
 
   if [[ "$_pct" -lt "$_threshold" ]]; then
