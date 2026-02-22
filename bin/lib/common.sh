@@ -106,7 +106,7 @@ _extract_json_from_file() {
     return 2
   fi
   if jq empty "$_file" 2>/dev/null; then
-    cat "$_file"
+    jq -s 'last' "$_file"
     return 0
   fi
   _json=$(sed -n '/^```[a-zA-Z]*$/,/^```$/{ /^```/d; p; }' "$_file")
