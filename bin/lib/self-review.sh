@@ -374,8 +374,59 @@ EOF
   }
   trap _standalone_cleanup EXIT
 
-  # Build synthetic REVIEW_JSON
+  # ── Initial Claude review (standalone mode) ──────────────────────
+  # Use codex-review.prompt.md to generate findings before entering
+  # the self-review sub-loop, mirroring the review-loop.sh flow.
+  # The diff is pre-generated and appended to the prompt so Claude
+  # needs only read-only tools (no Bash access required).
   _REVIEW_JSON='{"findings":[],"overall_correctness":"not reviewed"}'
+  _initial_review_file="$_LOG_DIR/review-initial.json"
+
+  if [[ -f "$PROMPTS_DIR/codex-review.prompt.md" ]]; then
+    export ITERATION=0
+    _initial_prompt=$(envsubst '$CURRENT_BRANCH $TARGET_BRANCH $ITERATION' < "$PROMPTS_DIR/codex-review.prompt.md")
+    unset ITERATION
+
+    # Pre-generate diff and append to prompt so Claude doesn't need Bash
+    _initial_diff_content=$(git diff "$TARGET_BRANCH...$CURRENT_BRANCH")
+    _initial_prompt="${_initial_prompt}
+
+## Diff
+
+\`\`\`diff
+${_initial_diff_content}
+\`\`\`"
+
+    # Pre-flight budget check
+    if ! _wait_for_budget "claude" "${BUDGET_SCOPE:-module}"; then
+      echo "  Warning: Claude budget timeout before initial review." >&2
+    else
+      echo "[$(date +%H:%M:%S)] Running initial Claude review..."
+      _initial_ok=true
+      if ! printf '%s' "$_initial_prompt" | _retry_claude_cmd "$_initial_review_file" "initial review" \
+        claude -p - \
+        --allowedTools "Read,Glob,Grep"; then
+        echo "  Warning: initial review failed. Falling back to empty findings." >&2
+        _initial_ok=false
+      fi
+
+      if [[ "$_initial_ok" == true ]] && [[ -s "$_initial_review_file" ]]; then
+        _rc=0
+        _initial_json=$(_extract_json_from_file "$_initial_review_file") || _rc=$?
+        if [[ $_rc -eq 0 ]]; then
+          _initial_count=$(printf '%s' "$_initial_json" | jq '.findings | length')
+          echo "  Initial review: $_initial_count findings"
+          _REVIEW_JSON="$_initial_json"
+        else
+          echo "  Warning: could not parse initial review output. Falling back to empty findings." >&2
+        fi
+      elif [[ "$_initial_ok" == true ]]; then
+        echo "  Warning: initial review produced empty output. Falling back to empty findings." >&2
+      fi
+    fi
+  else
+    echo "  Warning: codex-review.prompt.md not found. Skipping initial review." >&2
+  fi
   if [[ -n "$_REFACTORING_PLAN_FILE" ]]; then
     _plan=$(jq '.' "$_REFACTORING_PLAN_FILE") || {
       echo "Error: invalid JSON in refactoring plan file: $_REFACTORING_PLAN_FILE"
