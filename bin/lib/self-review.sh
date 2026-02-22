@@ -392,7 +392,7 @@ EOF
       _initial_diff_content=$(git diff "$TARGET_BRANCH...$CURRENT_BRANCH")
     else
       # Dirty-tree: diff of uncommitted changes (including untracked files)
-      local _untracked_tmp; _untracked_tmp=$(mktemp)
+      _untracked_tmp=$(mktemp)
       git ls-files --others --exclude-standard -z > "$_untracked_tmp"
       if [[ -s "$_untracked_tmp" ]]; then
         xargs -0 git add --intent-to-add -- < "$_untracked_tmp" 2>/dev/null || true
