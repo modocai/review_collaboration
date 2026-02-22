@@ -385,6 +385,16 @@ for (( i=1; i<=MAX_LOOP; i++ )); do
   # ── c. Codex review ──────────────────────────────────────────────
   REVIEW_FILE="$LOG_DIR/review-${i}.json"
 
+  # Invalidate review reuse if the diff changed since the review was generated
+  if [[ "$_REUSE_REVIEW" == true ]] && [[ "$i" -eq "$_RESUME_FROM" ]]; then
+    _saved_hash=$(cat "$LOG_DIR/diff-hash-${i}.txt" 2>/dev/null || true)
+    _curr_hash=$(git diff "$TARGET_BRANCH...$CURRENT_BRANCH" | shasum -a 256 | cut -d' ' -f1)
+    if [[ -z "$_saved_hash" ]] || [[ "$_saved_hash" != "$_curr_hash" ]]; then
+      echo "  [resume] Diff changed since last review; re-running Codex."
+      _REUSE_REVIEW=false
+    fi
+  fi
+
   if [[ "$RESUME" == true ]] && [[ "$_REUSE_REVIEW" == true ]] \
      && [[ "$i" -eq "$_RESUME_FROM" ]] && [[ -f "$REVIEW_FILE" ]]; then
     echo "  [resume] Reusing saved review: $REVIEW_FILE"
@@ -410,6 +420,7 @@ for (( i=1; i<=MAX_LOOP; i++ )); do
       break
     fi
     rm -f "$CODEX_STDERR"
+    git diff "$TARGET_BRANCH...$CURRENT_BRANCH" | shasum -a 256 | cut -d' ' -f1 > "$LOG_DIR/diff-hash-${i}.txt"
   fi
 
   # ── d. Extract JSON from response ────────────────────────────────
