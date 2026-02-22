@@ -250,6 +250,10 @@ if [[ "$RESUME" == true ]]; then
   elif [[ -n "$_saved_scope" ]] && [[ "$_SCOPE_EXPLICIT" == false ]]; then
     SCOPE="$_saved_scope"
   fi
+  _saved_target=$(cat "$_early_log_dir/target-branch.txt" 2>/dev/null || true)
+  if [[ -n "$_saved_target" ]] && ! git rev-parse --verify "$_saved_target" &>/dev/null; then
+    echo "Error: saved target branch '$_saved_target' does not exist." >&2; exit 1
+  fi
 
   # Destructive stash/reset only when applying fixes (non-dry-run)
   if [[ "$DRY_RUN" == false ]]; then

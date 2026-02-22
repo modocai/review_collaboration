@@ -105,6 +105,9 @@ _extract_json_from_file() {
   if [[ ! -f "$_file" ]]; then
     return 2
   fi
+  if [[ ! -s "$_file" ]]; then
+    return 1
+  fi
   if jq empty "$_file" 2>/dev/null; then
     jq -s 'last' "$_file"
     return 0
