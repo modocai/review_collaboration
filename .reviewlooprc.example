@@ -21,8 +21,8 @@
 # PROMPTS_DIR="./custom-prompts"
 
 # ── Retry / Rate-Limit Settings ──────────────────────────────────────
-# Max total wait (seconds) for a single CLI call to recover from rate limits (default: 600)
-# RETRY_MAX_WAIT=600
+# Max total wait (seconds) for a single CLI call to recover from rate limits (default: 7200)
+# RETRY_MAX_WAIT=7200
 
 # Initial backoff delay (seconds); doubles each retry, capped at 300s (default: 30)
 # RETRY_INITIAL_WAIT=30
