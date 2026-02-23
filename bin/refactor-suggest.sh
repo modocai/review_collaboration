@@ -549,15 +549,7 @@ for (( i=1; i<=MAX_LOOP; i++ )); do
   fi
 
   # ── b. Extract JSON from response ────────────────────────────────
-  _rc=0
-  REVIEW_JSON=$(_extract_json_from_file "$REVIEW_FILE") || _rc=$?
-  if [[ $_rc -ne 0 ]]; then
-    if [[ $_rc -eq 2 ]]; then
-      echo "Warning: analysis output file not found ($REVIEW_FILE). Codex may have failed."
-    else
-      echo "Warning: could not parse analysis output as JSON."
-    fi
-    echo "  See $REVIEW_FILE for details."
+  if ! REVIEW_JSON=$(_parse_review_json "$REVIEW_FILE" "analysis"); then
     FINAL_STATUS="parse_error"
     break
   fi

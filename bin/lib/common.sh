@@ -122,6 +122,26 @@ _extract_json_from_file() {
   printf '%s' "$_json"
 }
 
+# Wrapper: parse review JSON with standardized warnings.
+# $1 = file path, $2 = label (e.g. "review", "analysis", "self-review")
+# stdout = parsed JSON; stderr = warnings on failure.
+# Returns: 0 success, 1 parse error, 2 file not found.
+_parse_review_json() {
+  local _file="$1" _label="$2" _rc=0
+  local _json
+  _json=$(_extract_json_from_file "$_file") || _rc=$?
+  if [[ $_rc -ne 0 ]]; then
+    if [[ $_rc -eq 2 ]]; then
+      echo "  Warning: $_label output file not found ($_file)." >&2
+    else
+      echo "  Warning: could not parse $_label output as JSON." >&2
+    fi
+    echo "  See $_file for details." >&2
+    return $_rc
+  fi
+  printf '%s' "$_json"
+}
+
 # ── Worktree Snapshots ──────────────────────────────────────────────
 # Snapshot every dirty/untracked file's hash+mode into a temp file.
 # Prints temp file path to stdout; caller must rm.

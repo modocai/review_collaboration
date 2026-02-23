@@ -154,14 +154,7 @@ GUIDELINES
       _summary="${_summary}Sub-iteration $_j: empty output\n"
       break
     fi
-    _rc=0
-    _self_review_json=$(_extract_json_from_file "$_self_review_file") || _rc=$?
-    if [[ $_rc -ne 0 ]]; then
-      if [[ $_rc -eq 2 ]]; then
-        echo "  Warning: self-review output file not found ($_self_review_file)." >&2
-      else
-        echo "  Warning: could not parse self-review output." >&2
-      fi
+    if ! _self_review_json=$(_parse_review_json "$_self_review_file" "self-review"); then
       echo "  Continuing with current fixes." >&2
       _summary="${_summary}Sub-iteration $_j: parse error\n"
       break
