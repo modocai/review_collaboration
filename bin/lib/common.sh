@@ -120,6 +120,12 @@ sha256() {
   fi
 }
 
+# Compute SHA-256 hash of the diff between TARGET_BRANCH and CURRENT_BRANCH.
+# Uses globals: TARGET_BRANCH, CURRENT_BRANCH (read-only)
+_diff_hash() {
+  git diff "$TARGET_BRANCH...$CURRENT_BRANCH" | sha256 | cut -d' ' -f1
+}
+
 # ── gh CLI detection ─────────────────────────────────────────────────
 HAS_GH=true
 if ! command -v gh &>/dev/null; then
