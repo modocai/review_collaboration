@@ -197,6 +197,10 @@ if [[ "$RESUME" == true ]]; then
         exit 0 ;;
     esac
   fi
+  _saved_target=$(cat "$_early_log_dir/target-branch.txt" 2>/dev/null || true)
+  if [[ -n "$_saved_target" ]] && ! git rev-parse --verify "$_saved_target" &>/dev/null; then
+    echo "Error: saved target branch '$_saved_target' does not exist." >&2; exit 1
+  fi
   unset _early_log_dir _expected_branch
 
   # Destructive stash/reset only when applying fixes (non-dry-run)

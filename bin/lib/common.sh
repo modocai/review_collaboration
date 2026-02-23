@@ -105,8 +105,11 @@ _extract_json_from_file() {
   if [[ ! -f "$_file" ]]; then
     return 2
   fi
+  if [[ ! -s "$_file" ]]; then
+    return 1
+  fi
   if jq empty "$_file" 2>/dev/null; then
-    cat "$_file"
+    jq -s 'last' "$_file"
     return 0
   fi
   _json=$(sed -n '/^```[a-zA-Z]*$/,/^```$/{ /^```/d; p; }' "$_file")
@@ -331,10 +334,12 @@ _resume_detect_state() {
 }
 
 # Reset working tree to last committed state (clean partial edits).
+# Callers must stash uncommitted changes (including untracked files) before
+# invoking this function — git clean is intentionally omitted to avoid
+# destroying untracked files that fall outside the stash.
 _resume_reset_working_tree() {
   git reset --quiet HEAD 2>/dev/null || true
-  git checkout -- "$(git rev-parse --show-toplevel)" 2>/dev/null || true
-  git clean -fd --quiet "$(git rev-parse --show-toplevel)" 2>/dev/null || true
+  git checkout -- "$(git rev-parse --show-toplevel)" 2>/dev/null || echo "  Warning: git checkout failed during resume reset." >&2
 }
 
 # ── Summary Generation ──────────────────────────────────────────────
