@@ -139,48 +139,11 @@ _check_codex_token_budget() {
 # $2 = (optional) pre-fetched JSON from _check_codex_token_budget
 # return 0 = go, return 1 = no-go
 _codex_budget_sufficient() {
-  local _scope="${1:-module}" _threshold _budget_json _pct _7d_pct
-
-  case "$_scope" in
-    micro)  _threshold=90 ;;
-    module) _threshold=75 ;;
-    layer|full)
-      echo "Warning: no established threshold for '$_scope' — skipping budget check" >&2
-      return 0
-      ;;
-    *)
-      echo "Error: unknown scope '$_scope'. Use: micro, module, layer, full" >&2
-      return 1
-      ;;
-  esac
-
-  _budget_json="${2:-$(_check_codex_token_budget)}"
-  _pct=$(printf '%s' "$_budget_json" | jq -r '.five_hour_used_pct')
-
-  # Check 7-day window first — exhausted=always NO-GO, >=90%=module+ NO-GO
-  _7d_pct=$(printf '%s' "$_budget_json" | jq -r '.seven_day_used_pct')
-  if [[ "$_7d_pct" != "null" ]]; then
-    if [[ "$_7d_pct" -ge 100 ]]; then
-      echo "Budget check failed: 7-day window ${_7d_pct}% used (exhausted)" >&2
-      return 1
-    fi
-    if [[ "$_7d_pct" -ge 90 ]] && [[ "$_threshold" -le 75 ]]; then
-      echo "Budget check failed: 7-day window ${_7d_pct}% used (threshold for '$_scope' requires <90%)" >&2
-      return 1
-    fi
+  if ! declare -F _budget_sufficient &>/dev/null; then
+    source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
   fi
-
-  if [[ "$_pct" == "null" ]]; then
-    echo "Notice: no budget data — assuming OK (first run or stale logs)" >&2
-    return 0
-  fi
-
-  if [[ "$_pct" -lt "$_threshold" ]]; then
-    return 0
-  else
-    echo "Budget check failed: ${_pct}% used (threshold for '$_scope' is <${_threshold}%)" >&2
-    return 1
-  fi
+  local _json="${2:-$(_check_codex_token_budget)}"
+  _budget_sufficient "${1:-module}" "$_json"
 }
 
 # ── Standalone mode ──────────────────────────────────────────────────
@@ -223,18 +186,12 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   echo "  micro:  <90%   module: <75%   layer: TBD    full: TBD"
   echo ""
 
-  # Show go/no-go for each scope (reuse _pct to avoid redundant calls)
-  _thresholds="micro:90 module:75"
-  for _entry in $_thresholds; do
-    _s="${_entry%%:*}"
-    _thr="${_entry##*:}"
-    if [[ "$_weekly_pct" != "null" ]] && [[ "$_weekly_pct" -ge 100 ]]; then
-      printf '  %-8s NO-GO (7d exhausted)\n' "$_s:"
-    elif [[ "$_weekly_pct" != "null" ]] && [[ "$_weekly_pct" -ge 90 ]] && [[ "$_thr" -le 75 ]]; then
-      printf '  %-8s NO-GO (7d %s%%)\n' "$_s:" "$_weekly_pct"
-    elif [[ "$_pct" == "null" ]]; then
-      printf '  %-8s GO    (no data — assuming OK)\n' "$_s:"
-    elif [[ "$_pct" -lt "$_thr" ]]; then
+  # Show go/no-go for each scope (reuse _json to avoid redundant calls).
+  # Source common.sh for _budget_sufficient (include guards prevent circular load).
+  _BUDGET_POLICY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  source "$_BUDGET_POLICY_DIR/common.sh"
+  for _s in micro module; do
+    if _budget_sufficient "$_s" "$_json"; then
       printf '  %-8s GO\n' "$_s:"
     else
       printf '  %-8s NO-GO\n' "$_s:"

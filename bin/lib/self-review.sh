@@ -265,22 +265,22 @@ EOF
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --max-subloop)
-        if [[ $# -lt 2 ]]; then echo "Error: '$1' requires an argument."; usage 1; fi
+        _require_arg "$1" "$#" || usage 1
         _MAX_SUBLOOP="$2"; shift 2 ;;
       --dry-run)         _DRY_RUN=true; shift ;;
       --fix-nits)        _FIX_NITS=true; shift ;;
       --diagnostic-log)  DIAGNOSTIC_LOG=true; shift ;;
       --refactoring-plan)
-        if [[ $# -lt 2 ]]; then echo "Error: '$1' requires an argument."; usage 1; fi
+        _require_arg "$1" "$#" || usage 1
         _REFACTORING_PLAN_FILE="$2"; shift 2 ;;
       --log-dir)
-        if [[ $# -lt 2 ]]; then echo "Error: '$1' requires an argument."; usage 1; fi
+        _require_arg "$1" "$#" || usage 1
         _LOG_DIR="$2"; shift 2 ;;
       --iteration)
-        if [[ $# -lt 2 ]]; then echo "Error: '$1' requires an argument."; usage 1; fi
+        _require_arg "$1" "$#" || usage 1
         _ITERATION="$2"; shift 2 ;;
       -t|--target)
-        if [[ $# -lt 2 ]]; then echo "Error: '$1' requires an argument."; usage 1; fi
+        _require_arg "$1" "$#" || usage 1
         _TARGET="$2"; shift 2 ;;
       -h|--help) usage ;;
       *)         echo "Error: unknown option '$1'"; usage 1 ;;
@@ -414,7 +414,7 @@ ${_initial_diff_content}
         if [[ $_rc -eq 0 ]]; then
           _initial_count=$(printf '%s' "$_initial_json" | jq '.findings | length')
           echo "  Initial review: $_initial_count findings"
-          _REVIEW_JSON="$_initial_json"
+          _REVIEW_JSON=$(printf '%s' "$_initial_json" | _normalize_review_json_paths)
         else
           echo "  Warning: could not parse initial review output. Falling back to empty findings." >&2
         fi
