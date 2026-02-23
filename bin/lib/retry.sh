@@ -83,8 +83,8 @@ _seconds_until_iso() {
 # $3 = max_wait (seconds, optional — defaults to RETRY_MAX_WAIT)
 # return 0 = budget OK, return 1 = timeout
 _wait_for_budget() {
-  local _tool="$1" _scope="${2:-module}" _max_wait="${3:-${RETRY_MAX_WAIT:-600}}"
-  local _elapsed=0 _poll_wait=30 _budget_json _resets_at _wait_secs
+  local _tool="$1" _scope="${2:-module}" _max_wait="${3:-${RETRY_MAX_WAIT:-7200}}"
+  local _elapsed=0 _poll_wait=600 _budget_json _resets_at _wait_secs
 
   # Fetch once — reuse for both check and resets_at extraction
   _budget_json=$(_wait_for_budget_fetch "$_tool")
@@ -126,10 +126,10 @@ _wait_for_budget() {
       return 0
     fi
 
-    # Increase poll interval (30 → 60 → 120, cap at 120)
-    if [[ "$_poll_wait" -lt 120 ]]; then
+    # Increase poll interval (600 → 1200, cap at 1200)
+    if [[ "$_poll_wait" -lt 1200 ]]; then
       _poll_wait=$(( _poll_wait * 2 ))
-      [[ "$_poll_wait" -gt 120 ]] && _poll_wait=120
+      [[ "$_poll_wait" -gt 1200 ]] && _poll_wait=1200
     fi
   done
 

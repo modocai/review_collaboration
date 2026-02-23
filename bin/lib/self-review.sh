@@ -134,7 +134,7 @@ GUIDELINES
     _self_review_prompt=$(envsubst '$CURRENT_BRANCH $TARGET_BRANCH $ITERATION $REVIEW_JSON $DIFF_FILE $EXTRA_REVIEW_GUIDELINES' < "$PROMPTS_DIR/claude-self-review.prompt.md")
 
     # Pre-flight budget check
-    if ! _wait_for_budget "claude" "${BUDGET_SCOPE:-module}"; then
+    if ! _wait_for_budget "claude" "${BUDGET_SCOPE:-micro}"; then
       echo "  Warning: Claude budget timeout before self-review." >&2
       break
     fi
@@ -418,7 +418,7 @@ ${_initial_diff_content}
 \`\`\`"
 
     # Pre-flight budget check
-    if ! _wait_for_budget "claude" "${BUDGET_SCOPE:-module}"; then
+    if ! _wait_for_budget "claude" "${BUDGET_SCOPE:-micro}"; then
       echo "  Warning: Claude budget timeout before initial review." >&2
     else
       echo "[$(date +%H:%M:%S)] Running initial Claude review..."
