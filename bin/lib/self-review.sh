@@ -39,6 +39,7 @@ _sr_inject_refactoring_plan() {
 #   SR_DRY_RUN           if "true", review only — skip re-fix
 #   SR_FIX_NITS          if "true", also flag nits and potential issues
 #   SR_INITIAL_DIFF_FILE pre-generated diff for first iteration (branch diff mode)
+#   SR_COMMIT_SNAPSHOT   snapshot file path — commit+push after each sub-iteration
 #
 # Required globals (read-only): CURRENT_BRANCH, TARGET_BRANCH, PROMPTS_DIR
 #
@@ -132,10 +133,16 @@ GUIDELINES
 
     _self_review_prompt=$(envsubst '$CURRENT_BRANCH $TARGET_BRANCH $ITERATION $REVIEW_JSON $DIFF_FILE $EXTRA_REVIEW_GUIDELINES' < "$PROMPTS_DIR/claude-self-review.prompt.md")
 
+    # Pre-flight budget check
+    if ! _wait_for_budget "claude" "${BUDGET_SCOPE:-module}"; then
+      echo "  Warning: Claude budget timeout before self-review." >&2
+      break
+    fi
+
     # Claude self-review — tool access for git diff, file reading, etc.
-    if ! printf '%s' "$_self_review_prompt" | claude -p - \
-      --allowedTools "Read,Glob,Grep" \
-      > "$_self_review_file" 2>&1; then
+    if ! printf '%s' "$_self_review_prompt" | _retry_claude_cmd "$_self_review_file" "self-review" \
+      claude -p - \
+      --allowedTools "Read,Glob,Grep"; then
       echo "  Warning: self-review failed (sub-iteration $_j). Continuing with current fixes." >&2
       _summary="${_summary}Sub-iteration $_j: self-review failed\n"
       break
@@ -195,6 +202,23 @@ GUIDELINES
       "$_opinion_prompt" "$_execute_prompt" >&2; then
       _summary="${_summary}Sub-iteration $_j: $_sr_findings findings — re-fix failed\n"
       break
+    fi
+    # Commit per sub-iteration if snapshot path provided
+    if [[ -n "${SR_COMMIT_SNAPSHOT:-}" ]] && [[ "$_dry_run" != true ]]; then
+      if ! git diff --quiet || ! git diff --cached --quiet \
+         || [[ -n "$(git ls-files --others --exclude-standard)" ]]; then
+        if _commit_and_push "$SR_COMMIT_SNAPSHOT" \
+          "fix(ai-review): apply self-review sub-iteration $_j" \
+          "$CURRENT_BRANCH" >&2; then
+          # Refresh snapshot for next iteration
+          local _new_snap
+          _new_snap=$(_snapshot_worktree)
+          cp "$_new_snap" "$SR_COMMIT_SNAPSHOT"
+          rm -f "$_new_snap"
+        else
+          echo "  Warning: commit/push failed (sub-iteration $_j). Continuing." >&2
+        fi
+      fi
     fi
     _summary="${_summary}Sub-iteration $_j: $_sr_findings findings — re-fixed\n"
   done
@@ -347,15 +371,80 @@ EOF
   # Empty baseline — treat all current dirty files as "changes to review"
   PRE_FIX_STATE=$(mktemp)
   _standalone_cleanup() {
-    rm -f "$PRE_FIX_STATE"
+    rm -f "$PRE_FIX_STATE" "${_COMMIT_SNAPSHOT:-}"
     if [[ "$_AUTO_LOG_DIR" == true ]] && [[ -d "$_LOG_DIR" ]]; then
       rm -rf "$_LOG_DIR"
     fi
   }
   trap _standalone_cleanup EXIT
 
-  # Build synthetic REVIEW_JSON
+  # ── Initial Claude review (standalone mode) ──────────────────────
+  # Use codex-review.prompt.md to generate findings before entering
+  # the self-review sub-loop, mirroring the review-loop.sh flow.
+  # The diff is pre-generated and appended to the prompt so Claude
+  # needs only read-only tools (no Bash access required).
   _REVIEW_JSON='{"findings":[],"overall_correctness":"not reviewed"}'
+  _initial_review_file="$_LOG_DIR/review-initial.json"
+
+  if [[ -f "$PROMPTS_DIR/codex-review.prompt.md" ]]; then
+    export ITERATION=0
+    _initial_prompt=$(envsubst '$CURRENT_BRANCH $TARGET_BRANCH $ITERATION' < "$PROMPTS_DIR/codex-review.prompt.md")
+    unset ITERATION
+
+    # Pre-generate diff and append to prompt so Claude doesn't need Bash
+    if [[ "$_BRANCH_DIFF_MODE" == true ]]; then
+      _initial_diff_content=$(git diff "$TARGET_BRANCH...$CURRENT_BRANCH")
+    else
+      # Dirty-tree: diff of uncommitted changes (including untracked files)
+      _untracked_tmp=$(mktemp)
+      git ls-files --others --exclude-standard -z > "$_untracked_tmp"
+      if [[ -s "$_untracked_tmp" ]]; then
+        xargs -0 git add --intent-to-add -- < "$_untracked_tmp" 2>/dev/null || true
+      fi
+      _initial_diff_content=$(git diff HEAD)
+      if [[ -s "$_untracked_tmp" ]]; then
+        xargs -0 git reset --quiet -- < "$_untracked_tmp" 2>/dev/null || true
+      fi
+      rm -f "$_untracked_tmp"
+    fi
+    _initial_prompt="${_initial_prompt}
+
+## Diff
+
+\`\`\`diff
+${_initial_diff_content}
+\`\`\`"
+
+    # Pre-flight budget check
+    if ! _wait_for_budget "claude" "${BUDGET_SCOPE:-module}"; then
+      echo "  Warning: Claude budget timeout before initial review." >&2
+    else
+      echo "[$(date +%H:%M:%S)] Running initial Claude review..."
+      _initial_ok=true
+      if ! printf '%s' "$_initial_prompt" | _retry_claude_cmd "$_initial_review_file" "initial review" \
+        claude -p - \
+        --allowedTools "Read,Glob,Grep"; then
+        echo "  Warning: initial review failed. Falling back to empty findings." >&2
+        _initial_ok=false
+      fi
+
+      if [[ "$_initial_ok" == true ]] && [[ -s "$_initial_review_file" ]]; then
+        _rc=0
+        _initial_json=$(_extract_json_from_file "$_initial_review_file") || _rc=$?
+        if [[ $_rc -eq 0 ]]; then
+          _initial_count=$(printf '%s' "$_initial_json" | jq '.findings | length')
+          echo "  Initial review: $_initial_count findings"
+          _REVIEW_JSON="$_initial_json"
+        else
+          echo "  Warning: could not parse initial review output. Falling back to empty findings." >&2
+        fi
+      elif [[ "$_initial_ok" == true ]]; then
+        echo "  Warning: initial review produced empty output. Falling back to empty findings." >&2
+      fi
+    fi
+  else
+    echo "  Warning: codex-review.prompt.md not found. Skipping initial review." >&2
+  fi
   if [[ -n "$_REFACTORING_PLAN_FILE" ]]; then
     _plan=$(jq '.' "$_REFACTORING_PLAN_FILE") || {
       echo "Error: invalid JSON in refactoring plan file: $_REFACTORING_PLAN_FILE"
@@ -383,15 +472,21 @@ EOF
     git diff "$TARGET_BRANCH...$CURRENT_BRANCH" > "$_INITIAL_DIFF"
   fi
 
-  # Call the sub-loop
+  # Snapshot current state so we only commit files changed by the sub-loop,
+  # not pre-existing dirty files that happen to be in the working tree.
+  _COMMIT_SNAPSHOT=$(_snapshot_worktree)
+
+  # Call the sub-loop (commits per sub-iteration via SR_COMMIT_SNAPSHOT)
   SUMMARY=$(
     if [[ "$_DRY_RUN" == true ]]; then SR_DRY_RUN=true; fi
     if [[ "$_FIX_NITS" == true ]]; then SR_FIX_NITS=true; fi
     if [[ -n "$_REFACTORING_PLAN_FILE" ]]; then SR_REFIX_JSON_HOOK="_sr_inject_refactoring_plan"; fi
     if [[ -n "$_INITIAL_DIFF" ]]; then SR_INITIAL_DIFF_FILE="$_INITIAL_DIFF"; fi
+    if [[ "$_DRY_RUN" != true ]] && [[ "$_BRANCH_DIFF_MODE" == true ]]; then SR_COMMIT_SNAPSHOT="$_COMMIT_SNAPSHOT"; fi
     _self_review_subloop \
       "$PRE_FIX_STATE" "$_MAX_SUBLOOP" "$_LOG_DIR" "$_ITERATION" "$_REVIEW_JSON"
   )
+  rm -f "$_COMMIT_SNAPSHOT"
 
   echo ""
   echo "═══════════════════════════════════════════════════════"

@@ -6,10 +6,28 @@
 [[ -n "${_COMMON_SH_LOADED:-}" ]] && return 0
 _COMMON_SH_LOADED=1
 
+# ── Load companion libraries ────────────────────────────────────────
+_COMMON_SH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$_COMMON_SH_DIR/check-claude-limit.sh"
+source "$_COMMON_SH_DIR/check-codex-limit.sh"
+source "$_COMMON_SH_DIR/retry.sh"
+
 # ── Prerequisites ────────────────────────────────────────────────────
 check_cmd() {
   if ! command -v "$1" &>/dev/null; then
     echo "Error: '$1' is not installed or not in PATH."
+    exit 1
+  fi
+}
+
+# ── SHA-256 hashing (portable) ──────────────────────────────────────
+sha256() {
+  if command -v shasum &>/dev/null; then
+    shasum -a 256
+  elif command -v sha256sum &>/dev/null; then
+    sha256sum
+  else
+    echo "Error: neither 'shasum' nor 'sha256sum' found." >&2
     exit 1
   fi
 }
@@ -87,8 +105,11 @@ _extract_json_from_file() {
   if [[ ! -f "$_file" ]]; then
     return 2
   fi
+  if [[ ! -s "$_file" ]]; then
+    return 1
+  fi
   if jq empty "$_file" 2>/dev/null; then
-    cat "$_file"
+    jq -s 'last' "$_file"
     return 0
   fi
   _json=$(sed -n '/^```[a-zA-Z]*$/,/^```$/{ /^```/d; p; }' "$_file")
@@ -168,23 +189,35 @@ _claude_two_step_fix() {
 
   _prompt=$(REVIEW_JSON="$_rjson" envsubst '$CURRENT_BRANCH $TARGET_BRANCH $REVIEW_JSON' < "$PROMPTS_DIR/$_opinion_prompt")
 
+  # Pre-flight budget check (step 1)
+  if ! _wait_for_budget "claude" "${BUDGET_SCOPE:-module}"; then
+    echo "  Error: Claude budget timeout before $_label opinion." >&2
+    return 1
+  fi
+
   echo "[$(date +%H:%M:%S)] Running Claude $_label (step 1: opinion)..."
-  if ! printf '%s' "$_prompt" | claude -p - \
+  if ! printf '%s' "$_prompt" | _retry_claude_cmd "$_opinion_file" "$_label opinion" \
+    claude -p - \
     --session-id "$_session_id" \
-    --allowedTools "Read,Glob,Grep" \
-    > "$_opinion_file" 2>&1; then
+    --allowedTools "Read,Glob,Grep"; then
     echo "  Error: Claude $_label opinion failed. See $_opinion_file for details."
     return 1
   fi
   echo "  Opinion saved to $_opinion_file"
 
+  # Pre-flight budget check (step 2)
+  if ! _wait_for_budget "claude" "${BUDGET_SCOPE:-module}"; then
+    echo "  Error: Claude budget timeout before $_label execute." >&2
+    return 1
+  fi
+
   echo "[$(date +%H:%M:%S)] Running Claude $_label (step 2: execute)..."
   _exec_prompt=$(cat "$PROMPTS_DIR/$_execute_prompt")
 
-  if ! printf '%s' "$_exec_prompt" | claude -p - \
+  if ! printf '%s' "$_exec_prompt" | _retry_claude_cmd "$_fix_file" "$_label execute" \
+    claude -p - \
     --resume "$_session_id" \
-    --allowedTools "Edit,Read,Glob,Grep,Bash" \
-    > "$_fix_file" 2>&1; then
+    --allowedTools "Edit,Read,Glob,Grep,Bash"; then
     echo "  Error: Claude $_label execute failed. See $_fix_file for details."
     return 1
   fi
@@ -232,6 +265,81 @@ _commit_and_push() {
     fi
   fi
   return 0
+}
+
+# ── Resume Helpers ─────────────────────────────────────────────────
+# Detect resume state from log directory and git history.
+# $1 = log_dir, $2 = commit_pattern (e.g. "fix(ai-review): apply iteration")
+# stdout: JSON { "status": "...", "resume_from": N, "reuse_review": bool }
+# status: "completed" | "resumable" | "no_logs"
+_resume_detect_state() {
+  local _log_dir="$1" _commit_pattern="$2"
+
+  # 1) If summary.md exists, check for completed status
+  if [[ -f "$_log_dir/summary.md" ]]; then
+    local _final_status
+    _final_status=$(sed -n 's/.*\*\*Final status\*\*: //p' "$_log_dir/summary.md" | head -1)
+    [[ -z "$_final_status" ]] && _final_status="unknown"
+
+    case "$_final_status" in
+      all_clear|no_diff|dry_run|max_iterations_reached|auto_commit_disabled)
+        printf '{"status":"completed","resume_from":0,"reuse_review":false,"prev_status":"%s"}' "$_final_status"
+        return 0 ;;
+    esac
+  fi
+
+  # 2) Find last review file to determine failed iteration
+  local _last_i=0 _f _n
+  for _f in "$_log_dir"/review-*.json; do
+    [[ -e "$_f" ]] || continue
+    _n=$(basename "$_f" | sed 's/review-//;s/.json//')
+    [[ "$_n" -gt "$_last_i" ]] && _last_i="$_n"
+  done
+
+  if [[ "$_last_i" -eq 0 ]]; then
+    printf '{"status":"no_logs","resume_from":1,"reuse_review":false}'
+    return 0
+  fi
+
+  # 3) Check if commit exists for this iteration
+  # Trailing space prevents substring matches (e.g. iteration 1 matching 10).
+  # Scope to commits after run start to avoid matching previous runs.
+  local _log_range="HEAD"
+  if [[ -f "$_log_dir/start-commit.txt" ]]; then
+    local _start_commit
+    _start_commit=$(cat "$_log_dir/start-commit.txt" 2>/dev/null || true)
+    if [[ -n "$_start_commit" ]] && git rev-parse --verify "$_start_commit" &>/dev/null; then
+      _log_range="${_start_commit}..HEAD"
+    fi
+  fi
+  if git log --oneline --fixed-strings --grep="$_commit_pattern ${_last_i} " "$_log_range" 2>/dev/null | grep -q .; then
+    # Commit completed → start from next iteration (or mark completed if past max)
+    local _next=$(( _last_i + 1 ))
+    local _saved_max
+    _saved_max=$(cat "$_log_dir/max-loop.txt" 2>/dev/null || echo "0")
+    if [[ "$_saved_max" =~ ^[1-9][0-9]*$ ]] && [[ "$_next" -gt "$_saved_max" ]]; then
+      printf '{"status":"completed","resume_from":0,"reuse_review":false,"prev_status":"max_iterations_reached"}'
+    else
+      printf '{"status":"resumable","resume_from":%d,"reuse_review":false}' "$_next"
+    fi
+  else
+    # Commit missing → reuse this iteration's review JSON if valid
+    local _review_f="$_log_dir/review-${_last_i}.json"
+    if [[ -f "$_review_f" ]] && _extract_json_from_file "$_review_f" >/dev/null 2>&1; then
+      printf '{"status":"resumable","resume_from":%d,"reuse_review":true}' "$_last_i"
+    else
+      printf '{"status":"resumable","resume_from":%d,"reuse_review":false}' "$_last_i"
+    fi
+  fi
+}
+
+# Reset working tree to last committed state (clean partial edits).
+# Callers must stash uncommitted changes (including untracked files) before
+# invoking this function — git clean is intentionally omitted to avoid
+# destroying untracked files that fall outside the stash.
+_resume_reset_working_tree() {
+  git reset --quiet HEAD 2>/dev/null || true
+  git checkout -- "$(git rev-parse --show-toplevel)" 2>/dev/null || echo "  Warning: git checkout failed during resume reset." >&2
 }
 
 # ── Summary Generation ──────────────────────────────────────────────

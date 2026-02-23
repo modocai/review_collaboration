@@ -74,7 +74,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     -o)
       cat > "$2" <<'JSON'
-{"findings":[{"title":"mock finding","confidence_score":"high","code_location":{"file_path":"README.md","line_range":{"start":1,"end":1}}}],"overall_correctness":"needs review"}
+{"findings":[{"title":"mock finding","body":"Mock finding description.","confidence_score":0.8,"priority":1,"code_location":{"file_path":"README.md","line_range":{"start":1,"end":1}}}],"overall_correctness":"needs review"}
 JSON
       shift 2 ;;
     *) shift ;;

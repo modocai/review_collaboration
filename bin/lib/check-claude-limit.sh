@@ -8,9 +8,7 @@
 #   _check_claude_token_budget   # → JSON to stdout
 #   _claude_budget_sufficient full && echo "GO" || echo "NO-GO"
 
-if [[ -n "${_CHECK_CLAUDE_LIMIT_SH_LOADED:-}" ]]; then
-  [[ "${BASH_SOURCE[0]}" != "${0}" ]] && return 0 || exit 0
-fi
+[[ -n "${_CHECK_CLAUDE_LIMIT_SH_LOADED:-}" ]] && return 0
 _CHECK_CLAUDE_LIMIT_SH_LOADED=1
 
 # ── Internal: Detect subscription tier ───────────────────────────────
@@ -203,6 +201,25 @@ _claude_budget_sufficient() {
   _budget_json="${2:-$(_check_claude_token_budget)}"
   _pct=$(printf '%s' "$_budget_json" | jq -r '.five_hour_used_pct')
 
+  # Check 7-day window first — exhausted=always NO-GO, >=90%=module+ NO-GO
+  local _7d_pct
+  _7d_pct=$(printf '%s' "$_budget_json" | jq -r '.seven_day_used_pct')
+  if [[ "$_7d_pct" != "null" ]]; then
+    if [[ "$_7d_pct" -ge 100 ]]; then
+      echo "Budget check failed: 7-day window ${_7d_pct}% used (exhausted)" >&2
+      return 1
+    fi
+    if [[ "$_7d_pct" -ge 90 ]] && [[ "$_threshold" -le 75 ]]; then
+      echo "Budget check failed: 7-day window ${_7d_pct}% used (threshold for '$_scope' requires <90%)" >&2
+      return 1
+    fi
+  fi
+
+  if [[ "$_pct" == "null" ]]; then
+    echo "Notice: no budget data — assuming OK (first run or stale logs)" >&2
+    return 0
+  fi
+
   if [[ "$_pct" -lt "$_threshold" ]]; then
     return 0
   else
@@ -234,7 +251,9 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   echo "========================"
   echo "  Mode:       $_mode"
   echo "  Tier:       $_tier"
-  if [[ "$_resets" != "n/a" ]] && [[ "$_resets" != "null" ]]; then
+  if [[ "$_pct" == "null" ]]; then
+    echo "  5h used:    n/a (no session data)"
+  elif [[ "$_resets" != "n/a" ]] && [[ "$_resets" != "null" ]]; then
     echo "  5h used:    ${_pct}%    (resets $_resets)"
   else
     echo "  5h used:    ${_pct}%"
@@ -264,7 +283,13 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   for _entry in $_thresholds; do
     _s="${_entry%%:*}"
     _thr="${_entry##*:}"
-    if [[ "$_pct" -lt "$_thr" ]]; then
+    if [[ "$_weekly_pct" != "null" ]] && [[ "$_weekly_pct" -ge 100 ]]; then
+      printf '  %-8s NO-GO (7d exhausted)\n' "$_s:"
+    elif [[ "$_weekly_pct" != "null" ]] && [[ "$_weekly_pct" -ge 90 ]] && [[ "$_thr" -le 75 ]]; then
+      printf '  %-8s NO-GO (7d %s%%)\n' "$_s:" "$_weekly_pct"
+    elif [[ "$_pct" == "null" ]]; then
+      printf '  %-8s GO    (no data — assuming OK)\n' "$_s:"
+    elif [[ "$_pct" -lt "$_thr" ]]; then
       printf '  %-8s GO\n' "$_s:"
     else
       printf '  %-8s NO-GO\n' "$_s:"
