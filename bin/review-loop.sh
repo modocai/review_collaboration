@@ -20,6 +20,7 @@ _TARGET_BRANCH_EXPLICIT=false
 RETRY_MAX_WAIT=600
 RETRY_INITIAL_WAIT=30
 BUDGET_SCOPE="module"
+DIAGNOSTIC_LOG=false
 
 # ── Load .reviewlooprc (if present) ──────────────────────────────────
 # Project-level config file can override defaults above.
@@ -32,13 +33,13 @@ if [[ -n "$_GIT_ROOT" && -f "$_GIT_ROOT/$REVIEWLOOPRC" ]]; then
     # Skip blank lines and comments
     [[ -z "$_rc_line" || "$_rc_line" =~ ^[[:space:]]*# ]] && continue
     # Match KEY=VALUE (optionally quoted value); reject anything else
-    if [[ "$_rc_line" =~ ^[[:space:]]*(TARGET_BRANCH|MAX_LOOP|MAX_SUBLOOP|DRY_RUN|AUTO_COMMIT|PROMPTS_DIR|RETRY_MAX_WAIT|RETRY_INITIAL_WAIT|BUDGET_SCOPE)=[\"\']?([^\"\']*)[\"\']?[[:space:]]*$ ]]; then
+    if [[ "$_rc_line" =~ ^[[:space:]]*(TARGET_BRANCH|MAX_LOOP|MAX_SUBLOOP|DRY_RUN|AUTO_COMMIT|PROMPTS_DIR|RETRY_MAX_WAIT|RETRY_INITIAL_WAIT|BUDGET_SCOPE|DIAGNOSTIC_LOG)=[\"\']?([^\"\']*)[\"\']?[[:space:]]*$ ]]; then
       _rc_val="${BASH_REMATCH[2]}"
       _rc_key="${BASH_REMATCH[1]}"
       # Trim trailing whitespace from unquoted values
       _rc_val="${_rc_val%"${_rc_val##*[![:space:]]}"}"
       # Validate boolean values
-      if [[ "$_rc_key" == "DRY_RUN" || "$_rc_key" == "AUTO_COMMIT" ]]; then
+      if [[ "$_rc_key" == "DRY_RUN" || "$_rc_key" == "AUTO_COMMIT" || "$_rc_key" == "DIAGNOSTIC_LOG" ]]; then
         if [[ "$_rc_val" != "true" && "$_rc_val" != "false" ]]; then
           echo "Error: $_rc_key must be 'true' or 'false', got '$_rc_val'." >&2
           exit 1
@@ -87,6 +88,7 @@ Options:
   --no-auto-commit         Fix but do not commit/push (single iteration)
   --auto-commit            Force commit/push even if .reviewlooprc sets AUTO_COMMIT=false
   --resume                 Resume from a previously interrupted run (reuses existing logs)
+  --diagnostic-log         Save full Claude event stream to .stream.jsonl sidecar files
   -V, --version            Show version
   -h, --help               Show this help message
 
@@ -125,6 +127,7 @@ while [[ $# -gt 0 ]]; do
     --no-auto-commit)  AUTO_COMMIT=false; shift ;;
     --auto-commit)     AUTO_COMMIT=true; shift ;;
     --resume)          RESUME=true; shift ;;
+    --diagnostic-log)  DIAGNOSTIC_LOG=true; shift ;;
     -V|--version) echo "review-loop v$VERSION"; exit 0 ;;
     -h|--help)    usage ;;
     *)            echo "Error: unknown option '$1'"; usage 1 ;;
@@ -244,14 +247,14 @@ LOG_DIR="$SCRIPT_DIR/../logs"
 mkdir -p "$LOG_DIR"
 # Remove stale logs from previous runs so the summary only reflects this execution
 if [[ "$RESUME" == false ]]; then
-  rm -f "$LOG_DIR"/review-*.json "$LOG_DIR"/fix-*.md "$LOG_DIR"/opinion-*.md "$LOG_DIR"/self-review-*.json "$LOG_DIR"/refix-*.md "$LOG_DIR"/refix-opinion-*.md "$LOG_DIR"/summary.md
+  rm -f "$LOG_DIR"/review-*.json "$LOG_DIR"/fix-*.md "$LOG_DIR"/opinion-*.md "$LOG_DIR"/self-review-*.json "$LOG_DIR"/refix-*.md "$LOG_DIR"/refix-opinion-*.md "$LOG_DIR"/summary.md "$LOG_DIR"/*.stream.jsonl
   echo "$CURRENT_BRANCH" > "$LOG_DIR/branch.txt"
   git rev-parse HEAD > "$LOG_DIR/start-commit.txt"
   echo "$MAX_LOOP" > "$LOG_DIR/max-loop.txt"
   echo "$TARGET_BRANCH" > "$LOG_DIR/target-branch.txt"
 fi
 
-export CURRENT_BRANCH TARGET_BRANCH
+export CURRENT_BRANCH TARGET_BRANCH DIAGNOSTIC_LOG
 
 # Detect open PR for current branch (if any)
 PR_NUMBER=""
