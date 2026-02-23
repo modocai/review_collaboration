@@ -438,7 +438,7 @@ for (( i=1; i<=MAX_LOOP; i++ )); do
   # Invalidate review reuse if the diff changed since the review was generated
   if [[ "$_REUSE_REVIEW" == true ]] && [[ "$i" -eq "$_RESUME_FROM" ]]; then
     _saved_hash=$(cat "$LOG_DIR/diff-hash-${i}.txt" 2>/dev/null || true)
-    _curr_hash=$(_diff_hash)
+    _curr_hash=$(_diff_hash "$TARGET_BRANCH" "$CURRENT_BRANCH")
     if [[ -z "$_saved_hash" ]] || [[ "$_saved_hash" != "$_curr_hash" ]]; then
       echo "  [resume] Diff changed since last review; re-running Codex."
       _REUSE_REVIEW=false
@@ -470,7 +470,7 @@ for (( i=1; i<=MAX_LOOP; i++ )); do
       break
     fi
     rm -f "$CODEX_STDERR"
-    _diff_hash > "$LOG_DIR/diff-hash-${i}.txt"
+    _diff_hash "$TARGET_BRANCH" "$CURRENT_BRANCH" > "$LOG_DIR/diff-hash-${i}.txt"
   fi
 
   # ── d. Extract JSON from response ────────────────────────────────
@@ -525,7 +525,7 @@ EOF
     FINAL_STATUS="stash_error"
     break
   fi
-  _allowed_dirty_stashed=$([[ "$_stash_rc" -eq 0 ]] && echo true || echo false)
+  [[ "$_stash_rc" -eq 0 ]] && _allowed_dirty_stashed=true || _allowed_dirty_stashed=false
 
   # ── Snapshot pre-fix working tree state ──────────────────────────
   PRE_FIX_STATE=$(_snapshot_worktree)
