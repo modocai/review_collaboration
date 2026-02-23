@@ -142,16 +142,16 @@ EOF
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --scope)
-      if [[ $# -lt 2 ]]; then echo "Error: '$1' requires an argument."; usage 1; fi
+      _require_arg "$1" "$#" || usage 1
       SCOPE="$2"; _SCOPE_EXPLICIT=true; shift 2 ;;
     -t|--target)
-      if [[ $# -lt 2 ]]; then echo "Error: '$1' requires an argument."; usage 1; fi
+      _require_arg "$1" "$#" || usage 1
       TARGET_BRANCH="$2"; _TARGET_BRANCH_EXPLICIT=true; shift 2 ;;
     -n|--max-loop)
-      if [[ $# -lt 2 ]]; then echo "Error: '$1' requires an argument."; usage 1; fi
+      _require_arg "$1" "$#" || usage 1
       MAX_LOOP="$2"; _MAX_LOOP_EXPLICIT=true; shift 2 ;;
     --max-subloop)
-      if [[ $# -lt 2 ]]; then echo "Error: '$1' requires an argument."; usage 1; fi
+      _require_arg "$1" "$#" || usage 1
       MAX_SUBLOOP="$2"; shift 2 ;;
     --no-self-review)  MAX_SUBLOOP=0; shift ;;
     --dry-run)         DRY_RUN=true; shift ;;
@@ -162,7 +162,7 @@ while [[ $# -gt 0 ]]; do
     --diagnostic-log)  DIAGNOSTIC_LOG=true; shift ;;
     --with-review)     WITH_REVIEW=true; shift ;;
     --with-review-loops)
-      if [[ $# -lt 2 ]]; then echo "Error: '$1' requires an argument."; usage 1; fi
+      _require_arg "$1" "$#" || usage 1
       REVIEW_LOOPS="$2"; WITH_REVIEW=true; shift 2 ;;
     -V|--version) echo "refactor-suggest v$VERSION"; exit 0 ;;
     -h|--help)    usage ;;

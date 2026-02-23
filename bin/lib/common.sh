@@ -32,6 +32,16 @@ _require_core() {
   fi
 }
 
+# ── Argument Validation ─────────────────────────────────────────────
+# $1 = option name, $2 = remaining argc (caller's $#)
+# Returns non-zero so the caller can invoke its own usage().
+_require_arg() {
+  if [[ "$2" -lt 2 ]]; then
+    echo "Error: '$1' requires an argument."
+    return 1
+  fi
+}
+
 # ── Integer Validation ──────────────────────────────────────────────
 # $1 = option name (for error message), $2 = value
 _require_pos_int() {
