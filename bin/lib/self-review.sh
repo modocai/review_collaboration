@@ -154,14 +154,7 @@ GUIDELINES
       _summary="${_summary}Sub-iteration $_j: empty output\n"
       break
     fi
-    _rc=0
-    _self_review_json=$(_extract_json_from_file "$_self_review_file") || _rc=$?
-    if [[ $_rc -ne 0 ]]; then
-      if [[ $_rc -eq 2 ]]; then
-        echo "  Warning: self-review output file not found ($_self_review_file)." >&2
-      else
-        echo "  Warning: could not parse self-review output." >&2
-      fi
+    if ! _self_review_json=$(_parse_review_json "$_self_review_file" "self-review"); then
       echo "  Continuing with current fixes." >&2
       _summary="${_summary}Sub-iteration $_j: parse error\n"
       break
@@ -295,15 +288,8 @@ EOF
   done
 
   # Validation
-  if ! [[ "$_MAX_SUBLOOP" =~ ^[1-9][0-9]*$ ]]; then
-    echo "Error: --max-subloop must be a positive integer, got '$_MAX_SUBLOOP'."
-    exit 1
-  fi
-
-  if ! [[ "$_ITERATION" =~ ^[1-9][0-9]*$ ]]; then
-    echo "Error: --iteration must be a positive integer, got '$_ITERATION'."
-    exit 1
-  fi
+  _require_pos_int "--max-subloop" "$_MAX_SUBLOOP"
+  _require_pos_int "--iteration" "$_ITERATION"
 
   if [[ -n "$_REFACTORING_PLAN_FILE" ]] && [[ ! -f "$_REFACTORING_PLAN_FILE" ]]; then
     echo "Error: refactoring plan file not found: $_REFACTORING_PLAN_FILE"
@@ -311,16 +297,8 @@ EOF
   fi
 
   # Prerequisites
-  check_cmd git
+  _require_core
   check_cmd claude
-  check_cmd jq
-  check_cmd envsubst
-  check_cmd perl
-
-  if ! git rev-parse --is-inside-work-tree &>/dev/null; then
-    echo "Error: not inside a git repository."
-    exit 1
-  fi
 
   # Set globals
   CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
