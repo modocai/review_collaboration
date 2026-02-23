@@ -29,3 +29,8 @@
 
 # Pre-flight budget check scope: micro (<90%) or module (<75%) (default: module)
 # BUDGET_SCOPE="module"
+
+# ── Diagnostic Logging ──────────────────────────────────────────────
+# Save full Claude event stream (tool calls, reasoning) to .stream.jsonl files.
+# Useful for debugging missed findings. (default: false)
+# DIAGNOSTIC_LOG=false

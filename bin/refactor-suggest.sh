@@ -25,6 +25,7 @@ REVIEW_LOOPS=4
 RETRY_MAX_WAIT=600
 RETRY_INITIAL_WAIT=30
 BUDGET_SCOPE="module"
+DIAGNOSTIC_LOG=false
 
 # ── Load .refactorsuggestrc (if present) ──────────────────────────────
 REFACTORSUGGESTRC=".refactorsuggestrc"
@@ -32,12 +33,13 @@ _GIT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || true)
 if [[ -n "$_GIT_ROOT" && -f "$_GIT_ROOT/$REFACTORSUGGESTRC" ]]; then
   while IFS= read -r _rc_line || [[ -n "$_rc_line" ]]; do
     [[ -z "$_rc_line" || "$_rc_line" =~ ^[[:space:]]*# ]] && continue
-    if [[ "$_rc_line" =~ ^[[:space:]]*(SCOPE|TARGET_BRANCH|MAX_LOOP|MAX_SUBLOOP|DRY_RUN|AUTO_APPROVE|CREATE_PR|WITH_REVIEW|REVIEW_LOOPS|PROMPTS_DIR|RETRY_MAX_WAIT|RETRY_INITIAL_WAIT|BUDGET_SCOPE)=[\"\']?([^\"\']*)[\"\']?[[:space:]]*$ ]]; then
+    if [[ "$_rc_line" =~ ^[[:space:]]*(SCOPE|TARGET_BRANCH|MAX_LOOP|MAX_SUBLOOP|DRY_RUN|AUTO_APPROVE|CREATE_PR|WITH_REVIEW|REVIEW_LOOPS|PROMPTS_DIR|RETRY_MAX_WAIT|RETRY_INITIAL_WAIT|BUDGET_SCOPE|DIAGNOSTIC_LOG)=[\"\']?([^\"\']*)[\"\']?[[:space:]]*$ ]]; then
       _rc_val="${BASH_REMATCH[2]}"
       _rc_key="${BASH_REMATCH[1]}"
       _rc_val="${_rc_val%"${_rc_val##*[![:space:]]}"}"
       if [[ "$_rc_key" == "DRY_RUN" || "$_rc_key" == "AUTO_APPROVE" \
-         || "$_rc_key" == "CREATE_PR" || "$_rc_key" == "WITH_REVIEW" ]]; then
+         || "$_rc_key" == "CREATE_PR" || "$_rc_key" == "WITH_REVIEW" \
+         || "$_rc_key" == "DIAGNOSTIC_LOG" ]]; then
         if [[ "$_rc_val" != "true" && "$_rc_val" != "false" ]]; then
           echo "Error: $_rc_key must be 'true' or 'false', got '$_rc_val'." >&2
           exit 1
@@ -100,6 +102,7 @@ Options:
   --auto-approve           Skip interactive confirmation for layer/full scope
   --create-pr              Create a draft PR after completing all iterations
   --resume                 Resume from a previously interrupted run (reuses existing logs)
+  --diagnostic-log         Save full Claude event stream to .stream.jsonl sidecar files
   --with-review            Run review-loop after PR creation (default: 4 iterations)
   --with-review-loops <N>  Set review-loop iteration count (implies --with-review)
   -V, --version            Show version
@@ -154,6 +157,7 @@ while [[ $# -gt 0 ]]; do
     --auto-approve)    AUTO_APPROVE=true; shift ;;
     --create-pr)       CREATE_PR=true; shift ;;
     --resume)          RESUME=true; shift ;;
+    --diagnostic-log)  DIAGNOSTIC_LOG=true; shift ;;
     --with-review)     WITH_REVIEW=true; shift ;;
     --with-review-loops)
       if [[ $# -lt 2 ]]; then echo "Error: '$1' requires an argument."; usage 1; fi
@@ -357,7 +361,7 @@ elif [[ "$RESUME" == true ]]; then
   echo "Resume mode — staying on $CURRENT_BRANCH"
 fi
 
-export CURRENT_BRANCH TARGET_BRANCH
+export CURRENT_BRANCH TARGET_BRANCH DIAGNOSTIC_LOG
 
 # ── Log directory + source file list ──────────────────────────────────
 LOG_DIR="$SCRIPT_DIR/../logs/refactor"
@@ -365,7 +369,7 @@ mkdir -p "$LOG_DIR"
 if [[ "$RESUME" == false ]]; then
   rm -f "$LOG_DIR"/review-*.json "$LOG_DIR"/fix-*.md "$LOG_DIR"/opinion-*.md \
     "$LOG_DIR"/self-review-*.json "$LOG_DIR"/refix-*.md "$LOG_DIR"/refix-opinion-*.md \
-    "$LOG_DIR"/summary.md "$LOG_DIR"/source-files.txt
+    "$LOG_DIR"/summary.md "$LOG_DIR"/source-files.txt "$LOG_DIR"/*.stream.jsonl
   echo "$CURRENT_BRANCH" > "$LOG_DIR/branch.txt"
   git rev-parse HEAD > "$LOG_DIR/start-commit.txt"
   echo "$SCOPE" > "$LOG_DIR/scope.txt"
