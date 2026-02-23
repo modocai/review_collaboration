@@ -183,6 +183,9 @@ _check_claude_token_budget() {
 # $2 = (optional) pre-fetched JSON from _check_claude_token_budget
 # return 0 = go, return 1 = no-go
 _claude_budget_sufficient() {
+  if ! declare -F _budget_sufficient &>/dev/null; then
+    source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
+  fi
   local _json="${2:-$(_check_claude_token_budget)}"
   _budget_sufficient "${1:-module}" "$_json"
 }
