@@ -414,7 +414,7 @@ ${_initial_diff_content}
         if [[ $_rc -eq 0 ]]; then
           _initial_count=$(printf '%s' "$_initial_json" | jq '.findings | length')
           echo "  Initial review: $_initial_count findings"
-          _REVIEW_JSON="$_initial_json"
+          _REVIEW_JSON=$(printf '%s' "$_initial_json" | _normalize_review_json_paths)
         else
           echo "  Warning: could not parse initial review output. Falling back to empty findings." >&2
         fi

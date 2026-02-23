@@ -230,6 +230,19 @@ _parse_review_json() {
   printf '%s' "$_json"
 }
 
+# Normalize absolute paths in review JSON to repo-relative.
+# stdin = review JSON, stdout = normalized JSON
+_normalize_review_json_paths() {
+  jq --arg root "$(git rev-parse --show-toplevel)/" '
+    if .findings then
+      .findings |= map(
+        .code_location.file_path = (.code_location.file_path // .code_location.absolute_file_path | ltrimstr($root))
+        | del(.code_location.absolute_file_path)
+      )
+    else . end
+  '
+}
+
 # ── Worktree Snapshots ──────────────────────────────────────────────
 # Snapshot every dirty/untracked file's hash+mode into a temp file.
 # Prints temp file path to stdout; caller must rm.
