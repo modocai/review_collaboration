@@ -207,16 +207,17 @@ GUIDELINES
     if [[ -n "${SR_COMMIT_SNAPSHOT:-}" ]] && [[ "$_dry_run" != true ]]; then
       if ! git diff --quiet || ! git diff --cached --quiet \
          || [[ -n "$(git ls-files --others --exclude-standard)" ]]; then
-        if ! _commit_and_push "$SR_COMMIT_SNAPSHOT" \
+        if _commit_and_push "$SR_COMMIT_SNAPSHOT" \
           "fix(ai-review): apply self-review sub-iteration $_j" \
           "$CURRENT_BRANCH" >&2; then
+          # Refresh snapshot for next iteration
+          local _new_snap
+          _new_snap=$(_snapshot_worktree)
+          cp "$_new_snap" "$SR_COMMIT_SNAPSHOT"
+          rm -f "$_new_snap"
+        else
           echo "  Warning: commit/push failed (sub-iteration $_j). Continuing." >&2
         fi
-        # Refresh snapshot for next iteration
-        local _new_snap
-        _new_snap=$(_snapshot_worktree)
-        cp "$_new_snap" "$SR_COMMIT_SNAPSHOT"
-        rm -f "$_new_snap"
       fi
     fi
     _summary="${_summary}Sub-iteration $_j: $_sr_findings findings — re-fixed\n"
