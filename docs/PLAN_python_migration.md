@@ -190,16 +190,36 @@ src/mr_overkill/
 
 ### Phase 4: Orchestration Layer Migration ([#63](https://github.com/modocai/mr-overkill/issues/63))
 
-**Scope**: Main loops + reporting → Python
+**Scope**: Main loops + reporting → Python, with a unified loop engine
 
 ```
 src/mr_overkill/
-├── review_loop.py      # Main review loop
-├── refactor_suggest.py # Refactor suggestion loop
-├── self_review.py      # Self-review subloop
-├── reporting.py        # summary.md + PR comment generation
-├── two_step_fix.py     # Claude opinion → execute flow
+├── loop_engine.py        # Generic review-fix loop engine
+├── review_loop.py        # Thin config: Codex reviews, Claude fixes
+├── refactor_suggest.py   # Thin config: Codex analyzes, Claude fixes (scope-aware)
+├── self_review.py        # Thin config: Claude reviews, Claude fixes
+├── reporting.py          # summary.md + PR comment generation
+├── two_step_fix.py       # Claude opinion → execute flow
 ```
+
+**Core design — `loop_engine.py`**: The three bash scripts (`review-loop.sh`, `refactor-suggest.sh`, `self-review.sh`) all implement the same iteration pattern: `review → fix (two-step) → self-review → commit → repeat`. Currently this is duplicated ~150 LOC per script. `loop_engine.py` extracts and parameterizes this pattern:
+
+```python
+@dataclass
+class LoopConfig:
+    reviewer: Literal["codex", "claude"]
+    review_prompt: str
+    fix_opinion_prompt: str
+    fix_execute_prompt: str
+    review_json_hook: Callable[[dict], dict] | None = None
+    commit_pattern: str = ""
+    post_iteration_hook: Callable | None = None  # e.g. PR comment
+
+def review_fix_loop(config: LoopConfig, ...) -> LoopResult:
+    """Generic review → fix → self-review → commit loop."""
+```
+
+Each entry point (`review_loop.py`, `refactor_suggest.py`, `self_review.py`) becomes a thin wrapper that instantiates a `LoopConfig` and delegates to `review_fix_loop()`.
 
 **Transition strategy**: bash entry scripts become thin wrappers:
 
@@ -210,10 +230,34 @@ exec python3 -m mr_overkill review-loop "$@"
 ```
 
 **Deliverables**:
-- Complete Python implementation of review loop
+- `loop_engine.py`: unified loop engine parameterized by reviewer, prompts, and hooks
+- `review_loop.py` / `refactor_suggest.py` / `self_review.py`: thin `LoopConfig` + CLI arg parsing
+- Complete Python implementation of all three review modes
 - `--dry-run` flag support
-- Integration tests with mocked CLI tools
+- Integration tests verifying all three scripts use the same engine
 - bash scripts preserved as thin wrappers for backward compatibility
+
+## Architecture Changes (Phase 4)
+
+### Unified Review-Fix Loop
+
+The three main bash scripts duplicate the same iteration pattern (~150 LOC each):
+
+```
+review (Codex or Claude) → fix (Claude two-step) → self-review → commit → repeat
+```
+
+The only differences are **who reviews** (Codex vs Claude) and **which prompts/hooks** are used. Python Phase 4 extracts this into `loop_engine.py`:
+
+| Current (bash) | Python (Phase 4) |
+|---|---|
+| `review-loop.sh` main loop | `review_loop.py` + `loop_engine.py` |
+| `refactor-suggest.sh` main loop | `refactor_suggest.py` + `loop_engine.py` |
+| `self-review.sh` subloop | `self_review.py` + `loop_engine.py` |
+
+Parameterized by: reviewer tool, prompt templates, JSON hooks, commit pattern.
+
+This eliminates ~300 lines of structural duplication and makes adding new review modes (e.g., security audit, docs review) a matter of defining a new `LoopConfig` instance.
 
 ## Testing Strategy ([#64](https://github.com/modocai/mr-overkill/issues/64))
 
