@@ -24,8 +24,10 @@ git log HEAD..origin/<target-branch> --oneline
 4. Re-run the review loop — the merged code must pass review again
 
 **B) Target branch is up to date:**
-1. Merge the PR (`gh pr merge --merge --delete-branch`)
-2. Switch to the target branch, pull, and delete the local feature branch
+1. Merge the PR:
+   - Feature branch → target: `gh pr merge --merge --delete-branch`
+   - `develop` → `main`: `gh pr merge --merge` (**never** `--delete-branch` — `develop` is a long-lived branch)
+2. Switch to the target branch, pull, and delete the local feature branch (if applicable)
 
 ## Commit Messages
 
