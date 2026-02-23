@@ -39,6 +39,7 @@ _sr_inject_refactoring_plan() {
 #   SR_DRY_RUN           if "true", review only — skip re-fix
 #   SR_FIX_NITS          if "true", also flag nits and potential issues
 #   SR_INITIAL_DIFF_FILE pre-generated diff for first iteration (branch diff mode)
+#   SR_COMMIT_SNAPSHOT   snapshot file path — commit+push after each sub-iteration
 #
 # Required globals (read-only): CURRENT_BRANCH, TARGET_BRANCH, PROMPTS_DIR
 #
@@ -206,9 +207,11 @@ GUIDELINES
     if [[ -n "${SR_COMMIT_SNAPSHOT:-}" ]] && [[ "$_dry_run" != true ]]; then
       if ! git diff --quiet || ! git diff --cached --quiet \
          || [[ -n "$(git ls-files --others --exclude-standard)" ]]; then
-        _commit_and_push "$SR_COMMIT_SNAPSHOT" \
+        if ! _commit_and_push "$SR_COMMIT_SNAPSHOT" \
           "fix(ai-review): apply self-review sub-iteration $_j" \
-          "$CURRENT_BRANCH" >&2
+          "$CURRENT_BRANCH" >&2; then
+          echo "  Warning: commit/push failed (sub-iteration $_j). Continuing." >&2
+        fi
         # Refresh snapshot for next iteration
         local _new_snap
         _new_snap=$(_snapshot_worktree)
