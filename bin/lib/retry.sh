@@ -87,7 +87,7 @@ _wait_for_budget() {
   local _elapsed=0 _poll_wait=30 _budget_json _resets_at _wait_secs
 
   # Fetch once — reuse for both check and resets_at extraction
-  _budget_json=$(_wait_for_budget_fetch "$_tool")
+  _budget_json=$(wait_for_budget_fetch "$_tool")
 
   if _wait_for_budget_check "$_tool" "$_scope" "$_budget_json"; then
     return 0
@@ -147,8 +147,8 @@ _wait_for_budget_check() {
   esac
 }
 
-# Internal: fetch budget JSON for the tool
-_wait_for_budget_fetch() {
+# Fetch budget JSON for the given tool ("claude" | "codex")
+wait_for_budget_fetch() {
   local _tool="$1"
   case "$_tool" in
     claude) _check_claude_token_budget 2>/dev/null ;;

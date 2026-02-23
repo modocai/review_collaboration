@@ -311,7 +311,7 @@ _resolve_auto_scope() {
   local _max_pct=0 _max_7d=0 _tool _json _pct _7d
 
   for _tool in $_tools; do
-    _json=$(_wait_for_budget_fetch "$_tool")
+    _json=$(wait_for_budget_fetch "$_tool")
 
     _pct=$(printf '%s' "$_json" | jq -r '.five_hour_used_pct // 0')
     _7d=$(printf '%s' "$_json" | jq -r '.seven_day_used_pct // 0')
