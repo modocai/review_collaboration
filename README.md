@@ -74,7 +74,7 @@ npm install -g @anthropic-ai/claude-code  # Claude Code CLI
 .review-loop/bin/review-loop.sh -n 3
 
 # Refactor suggest — analyze full codebase for refactoring opportunities
-.review-loop/bin/refactor-suggest.sh --scope micro -n 1 --dry-run
+.review-loop/bin/refactor-suggest.sh -n 1 --dry-run
 ```
 
 ## Usage: review-loop.sh
@@ -84,11 +84,12 @@ review-loop.sh [OPTIONS]
 
 Options:
   -t, --target <branch>    Target branch to diff against (default: develop)
-  -n, --max-loop <N>       Maximum review-fix iterations (required)
+  -n, --max-loop <N>       Maximum review-fix iterations (required, unless --resume)
   --max-subloop <N>        Maximum self-review sub-iterations per fix (default: 4)
   --no-self-review         Disable self-review (equivalent to --max-subloop 0)
   --dry-run                Run review only, do not fix
   --no-auto-commit         Fix but do not commit/push (single iteration)
+  --resume                 Resume from a previously interrupted run (reuses existing logs)
   -V, --version            Show version
   -h, --help               Show this help message
 
@@ -97,6 +98,7 @@ Examples:
   review-loop.sh -n 5                  # diff against develop, max 5 loops
   review-loop.sh -n 1 --dry-run        # single review, no fixes
   review-loop.sh -n 3 --no-self-review # disable self-review sub-loop
+  review-loop.sh --resume              # resume an interrupted run
   review-loop.sh --version             # print version
 ```
 
@@ -108,26 +110,28 @@ Unlike `review-loop.sh` which reviews diffs, `refactor-suggest.sh` analyzes the 
 refactor-suggest.sh [OPTIONS]
 
 Options:
-  --scope <scope>          Refactoring scope: micro|module|layer|full (default: micro)
+  --scope <scope>          Refactoring scope: auto|micro|module|layer|full (default: auto)
   -t, --target <branch>    Target branch to base from (default: develop)
-  -n, --max-loop <N>       Maximum analysis-fix iterations (required)
+  -n, --max-loop <N>       Maximum analysis-fix iterations (default: 1)
   --max-subloop <N>        Maximum self-review sub-iterations per fix (default: 4)
   --no-self-review         Disable self-review (equivalent to --max-subloop 0)
   --dry-run                Run analysis only, do not apply fixes
   --no-dry-run             Force fixes even if .refactorsuggestrc sets DRY_RUN=true
   --auto-approve           Skip interactive confirmation for layer/full scope
   --create-pr              Create a draft PR after completing all iterations
+  --resume                 Resume from a previously interrupted run (reuses existing logs)
   --with-review            Run review-loop after PR creation (default: 4 iterations)
   --with-review-loops <N>  Set review-loop iteration count (implies --with-review)
   -V, --version            Show version
   -h, --help               Show this help message
 
 Examples:
-  refactor-suggest.sh --scope micro -n 3              # function/file-level fixes
-  refactor-suggest.sh --scope module -n 2 --dry-run   # analyze module duplication
+  refactor-suggest.sh -n 3                             # auto scope (budget-aware)
+  refactor-suggest.sh --scope micro -n 3               # function/file-level fixes
+  refactor-suggest.sh --scope module -n 2 --dry-run    # analyze module duplication
   refactor-suggest.sh --scope layer -n 1 --auto-approve  # cross-cutting concerns
-  refactor-suggest.sh --scope full -n 1 --create-pr   # architecture redesign + PR
-  refactor-suggest.sh --scope micro -n 2 --with-review          # refactor + auto review
+  refactor-suggest.sh --scope full -n 1 --create-pr    # architecture redesign + PR
+  refactor-suggest.sh -n 2 --with-review               # auto scope + auto review
   refactor-suggest.sh --scope module -n 3 --with-review-loops 6 # custom review iterations
 ```
 
@@ -135,6 +139,7 @@ Examples:
 
 | Scope | What it looks for | Blast radius |
 |-------|-------------------|--------------|
+| `auto` | Budget-aware automatic selection (default) | Varies — picks the highest scope your token budget allows |
 | `micro` | Complex functions, dead code, in-file duplication | Low — single file |
 | `module` | Cross-file duplication, module boundary issues | Low-medium — within a module |
 | `layer` | Inconsistent error handling, logging, config patterns | Medium-high — across modules |
@@ -179,7 +184,7 @@ Create a `.refactorsuggestrc` file in your project root to set defaults for `ref
 
 ```bash
 # .refactorsuggestrc
-SCOPE="micro"
+SCOPE="auto"
 TARGET_BRANCH="develop"
 MAX_LOOP=3
 MAX_SUBLOOP=4
