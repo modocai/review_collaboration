@@ -142,16 +142,16 @@ EOF
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --scope)
-      if [[ $# -lt 2 ]]; then echo "Error: '$1' requires an argument."; usage 1; fi
+      _require_arg "$1" "$#" || usage 1
       SCOPE="$2"; _SCOPE_EXPLICIT=true; shift 2 ;;
     -t|--target)
-      if [[ $# -lt 2 ]]; then echo "Error: '$1' requires an argument."; usage 1; fi
+      _require_arg "$1" "$#" || usage 1
       TARGET_BRANCH="$2"; _TARGET_BRANCH_EXPLICIT=true; shift 2 ;;
     -n|--max-loop)
-      if [[ $# -lt 2 ]]; then echo "Error: '$1' requires an argument."; usage 1; fi
+      _require_arg "$1" "$#" || usage 1
       MAX_LOOP="$2"; _MAX_LOOP_EXPLICIT=true; shift 2 ;;
     --max-subloop)
-      if [[ $# -lt 2 ]]; then echo "Error: '$1' requires an argument."; usage 1; fi
+      _require_arg "$1" "$#" || usage 1
       MAX_SUBLOOP="$2"; shift 2 ;;
     --no-self-review)  MAX_SUBLOOP=0; shift ;;
     --dry-run)         DRY_RUN=true; shift ;;
@@ -162,7 +162,7 @@ while [[ $# -gt 0 ]]; do
     --diagnostic-log)  DIAGNOSTIC_LOG=true; shift ;;
     --with-review)     WITH_REVIEW=true; shift ;;
     --with-review-loops)
-      if [[ $# -lt 2 ]]; then echo "Error: '$1' requires an argument."; usage 1; fi
+      _require_arg "$1" "$#" || usage 1
       REVIEW_LOOPS="$2"; WITH_REVIEW=true; shift 2 ;;
     -V|--version) echo "refactor-suggest v$VERSION"; exit 0 ;;
     -h|--help)    usage ;;
@@ -311,15 +311,15 @@ _resolve_auto_scope() {
   local _max_pct=0 _max_7d=0 _tool _json _pct _7d
 
   for _tool in $_tools; do
-    _json=$(_wait_for_budget_fetch "$_tool")
+    _json=$(wait_for_budget_fetch "$_tool")
 
     _pct=$(printf '%s' "$_json" | jq -r '.five_hour_used_pct // 0')
     _7d=$(printf '%s' "$_json" | jq -r '.seven_day_used_pct // 0')
 
-    [[ "$_pct" == "null" ]] && _pct=0
-    [[ "$_7d" == "null" ]] && _7d=0
+    [[ -z "$_pct" || "$_pct" == "null" ]] && _pct=0
+    [[ -z "$_7d" || "$_7d" == "null" ]] && _7d=0
 
-    # 7d exhausted → fatal
+    # 7d exhausted → fatal (per-tool for clear error message)
     if [[ "$_7d" -ge 100 ]]; then
       echo "Error: $_tool 7-day budget exhausted (${_7d}%)." >&2
       return 1
@@ -329,13 +329,20 @@ _resolve_auto_scope() {
     [[ "$_7d" -gt "$_max_7d" ]] && _max_7d="$_7d"
   done
 
-  if [[ "$_max_pct" -ge 90 ]]; then
-    echo "Error: budget too low for any scope (${_max_pct}% used in 5h window)." >&2
-    return 1
-  elif [[ "$_max_pct" -ge 75 ]] || [[ "$_max_7d" -ge 90 ]]; then
+  # Build worst-case budget JSON for shared policy check
+  local _worst_json
+  _worst_json=$(jq -n -c \
+    --argjson pct "$_max_pct" \
+    --argjson d7 "$_max_7d" \
+    '{five_hour_used_pct: $pct, seven_day_used_pct: $d7}')
+
+  if _budget_sufficient module "$_worst_json" 2>/dev/null; then
+    printf 'module'
+  elif _budget_sufficient micro "$_worst_json" 2>/dev/null; then
     printf 'micro'
   else
-    printf 'module'
+    echo "Error: budget too low for any scope (5h: ${_max_pct}%, 7d: ${_max_7d}%)." >&2
+    return 1
   fi
 }
 
@@ -531,7 +538,7 @@ for (( i=1; i<=MAX_LOOP; i++ )); do
   # Invalidate review reuse if the diff changed since the review was generated
   if [[ "$_REUSE_REVIEW" == true ]] && [[ "$i" -eq "$_RESUME_FROM" ]]; then
     _saved_hash=$(cat "$LOG_DIR/diff-hash-${i}.txt" 2>/dev/null || true)
-    _curr_hash=$(git diff "$TARGET_BRANCH...$CURRENT_BRANCH" | sha256 | cut -d' ' -f1)
+    _curr_hash=$(_diff_hash)
     if [[ -z "$_saved_hash" ]] || [[ "$_saved_hash" != "$_curr_hash" ]]; then
       echo "  [resume] Diff changed since last review; re-running Codex."
       _REUSE_REVIEW=false
@@ -563,7 +570,7 @@ for (( i=1; i<=MAX_LOOP; i++ )); do
       break
     fi
     rm -f "$CODEX_STDERR"
-    git diff "$TARGET_BRANCH...$CURRENT_BRANCH" | sha256 | cut -d' ' -f1 > "$LOG_DIR/diff-hash-${i}.txt"
+    _diff_hash > "$LOG_DIR/diff-hash-${i}.txt"
   fi
 
   # ── b. Extract JSON from response ────────────────────────────────
@@ -573,14 +580,7 @@ for (( i=1; i<=MAX_LOOP; i++ )); do
   fi
 
   # Normalize absolute paths to repo-relative
-  REVIEW_JSON=$(printf '%s' "$REVIEW_JSON" | jq --arg root "$(git rev-parse --show-toplevel)/" '
-    if .findings then
-      .findings |= map(
-        .code_location.file_path = (.code_location.file_path // .code_location.absolute_file_path | ltrimstr($root))
-        | del(.code_location.absolute_file_path)
-      )
-    else . end
-  ')
+  REVIEW_JSON=$(printf '%s' "$REVIEW_JSON" | _normalize_review_json_paths)
 
   # ── c. Check findings ───────────────────────────────────────────
   FINDINGS_COUNT=$(printf '%s' "$REVIEW_JSON" | jq '.findings | length')

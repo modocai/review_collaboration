@@ -6,6 +6,56 @@
 [[ -n "${_COMMON_SH_LOADED:-}" ]] && return 0
 _COMMON_SH_LOADED=1
 
+# ── Budget Go/No-Go Policy ──────────────────────────────────────────
+# Shared threshold + 7-day guard logic for all budget checkers.
+# $1 = scope: micro, module, layer, full
+# $2 = budget JSON (must have .five_hour_used_pct, .seven_day_used_pct)
+# return 0 = go, return 1 = no-go
+_budget_sufficient() {
+  local _scope="${1:-module}" _threshold _pct _7d_pct
+  local _budget_json="$2"
+
+  case "$_scope" in
+    micro)  _threshold=90 ;;
+    module) _threshold=75 ;;
+    layer|full)
+      echo "Warning: no established threshold for '$_scope' — skipping budget check" >&2
+      return 0
+      ;;
+    *)
+      echo "Error: unknown scope '$_scope'. Use: micro, module, layer, full" >&2
+      return 1
+      ;;
+  esac
+
+  _pct=$(printf '%s' "$_budget_json" | jq -r '.five_hour_used_pct')
+
+  # Check 7-day window first — exhausted=always NO-GO, >=90%=module+ NO-GO
+  _7d_pct=$(printf '%s' "$_budget_json" | jq -r '.seven_day_used_pct')
+  if [[ -n "$_7d_pct" ]] && [[ "$_7d_pct" != "null" ]]; then
+    if [[ "$_7d_pct" -ge 100 ]]; then
+      echo "Budget check failed: 7-day window ${_7d_pct}% used (exhausted)" >&2
+      return 1
+    fi
+    if [[ "$_7d_pct" -ge 90 ]] && [[ "$_threshold" -le 75 ]]; then
+      echo "Budget check failed: 7-day window ${_7d_pct}% used (threshold for '$_scope' requires <90%)" >&2
+      return 1
+    fi
+  fi
+
+  if [[ -z "$_pct" ]] || [[ "$_pct" == "null" ]]; then
+    echo "Notice: no budget data — assuming OK (first run or stale logs)" >&2
+    return 0
+  fi
+
+  if [[ "$_pct" -lt "$_threshold" ]]; then
+    return 0
+  else
+    echo "Budget check failed: ${_pct}% used (threshold for '$_scope' is <${_threshold}%)" >&2
+    return 1
+  fi
+}
+
 # ── Load companion libraries ────────────────────────────────────────
 _COMMON_SH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$_COMMON_SH_DIR/check-claude-limit.sh"
@@ -29,6 +79,16 @@ _require_core() {
   if ! git rev-parse --is-inside-work-tree &>/dev/null; then
     echo "Error: not inside a git repository."
     exit 1
+  fi
+}
+
+# ── Argument Validation ─────────────────────────────────────────────
+# $1 = option name, $2 = remaining argc (caller's $#)
+# Returns non-zero so the caller can invoke its own usage().
+_require_arg() {
+  if [[ "$2" -lt 2 ]]; then
+    echo "Error: '$1' requires an argument."
+    return 1
   fi
 }
 
@@ -58,6 +118,12 @@ sha256() {
     echo "Error: neither 'shasum' nor 'sha256sum' found." >&2
     exit 1
   fi
+}
+
+# Compute SHA-256 hash of the diff between TARGET_BRANCH and CURRENT_BRANCH.
+# Uses globals: TARGET_BRANCH, CURRENT_BRANCH (read-only)
+_diff_hash() {
+  git diff "$TARGET_BRANCH...$CURRENT_BRANCH" | sha256 | cut -d' ' -f1
 }
 
 # ── gh CLI detection ─────────────────────────────────────────────────
@@ -168,6 +234,19 @@ _parse_review_json() {
     return $_rc
   fi
   printf '%s' "$_json"
+}
+
+# Normalize absolute paths in review JSON to repo-relative.
+# stdin = review JSON, stdout = normalized JSON
+_normalize_review_json_paths() {
+  jq --arg root "$(git rev-parse --show-toplevel)/" '
+    if .findings then
+      .findings |= map(
+        .code_location.file_path = (.code_location.file_path // .code_location.absolute_file_path | ltrimstr($root))
+        | del(.code_location.absolute_file_path)
+      )
+    else . end
+  '
 }
 
 # ── Worktree Snapshots ──────────────────────────────────────────────

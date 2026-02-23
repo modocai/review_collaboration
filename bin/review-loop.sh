@@ -113,13 +113,13 @@ EOF
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -t|--target)
-      if [[ $# -lt 2 ]]; then echo "Error: '$1' requires an argument."; usage 1; fi
+      _require_arg "$1" "$#" || usage 1
       TARGET_BRANCH="$2"; _TARGET_BRANCH_EXPLICIT=true; shift 2 ;;
     -n|--max-loop)
-      if [[ $# -lt 2 ]]; then echo "Error: '$1' requires an argument."; usage 1; fi
+      _require_arg "$1" "$#" || usage 1
       MAX_LOOP="$2"; _MAX_LOOP_EXPLICIT=true; shift 2 ;;
     --max-subloop)
-      if [[ $# -lt 2 ]]; then echo "Error: '$1' requires an argument."; usage 1; fi
+      _require_arg "$1" "$#" || usage 1
       MAX_SUBLOOP="$2"; shift 2 ;;
     --no-self-review)  MAX_SUBLOOP=0; shift ;;
     --dry-run)         DRY_RUN=true; shift ;;
@@ -438,7 +438,7 @@ for (( i=1; i<=MAX_LOOP; i++ )); do
   # Invalidate review reuse if the diff changed since the review was generated
   if [[ "$_REUSE_REVIEW" == true ]] && [[ "$i" -eq "$_RESUME_FROM" ]]; then
     _saved_hash=$(cat "$LOG_DIR/diff-hash-${i}.txt" 2>/dev/null || true)
-    _curr_hash=$(git diff "$TARGET_BRANCH...$CURRENT_BRANCH" | sha256 | cut -d' ' -f1)
+    _curr_hash=$(_diff_hash)
     if [[ -z "$_saved_hash" ]] || [[ "$_saved_hash" != "$_curr_hash" ]]; then
       echo "  [resume] Diff changed since last review; re-running Codex."
       _REUSE_REVIEW=false
@@ -470,7 +470,7 @@ for (( i=1; i<=MAX_LOOP; i++ )); do
       break
     fi
     rm -f "$CODEX_STDERR"
-    git diff "$TARGET_BRANCH...$CURRENT_BRANCH" | sha256 | cut -d' ' -f1 > "$LOG_DIR/diff-hash-${i}.txt"
+    _diff_hash > "$LOG_DIR/diff-hash-${i}.txt"
   fi
 
   # ── d. Extract JSON from response ────────────────────────────────
@@ -480,14 +480,7 @@ for (( i=1; i<=MAX_LOOP; i++ )); do
   fi
 
   # Normalize absolute paths to repo-relative
-  REVIEW_JSON=$(printf '%s' "$REVIEW_JSON" | jq --arg root "$(git rev-parse --show-toplevel)/" '
-    if .findings then
-      .findings |= map(
-        .code_location.file_path = (.code_location.file_path // .code_location.absolute_file_path | ltrimstr($root))
-        | del(.code_location.absolute_file_path)
-      )
-    else . end
-  ')
+  REVIEW_JSON=$(printf '%s' "$REVIEW_JSON" | _normalize_review_json_paths)
 
   # ── e. Check findings ────────────────────────────────────────────
   FINDINGS_COUNT=$(printf '%s' "$REVIEW_JSON" | jq '.findings | length')
@@ -525,10 +518,14 @@ EOF
   # These files may be dirty from the installer or user edits.  Stash them
   # before snapshotting so they are excluded from Claude's commit even if
   # Claude happens to modify the same file.
-  _allowed_dirty_stashed=false
-  if _stash_allowlisted .gitignore .reviewlooprc .refactorsuggestrc; then
-    _allowed_dirty_stashed=true
+  _stash_rc=0
+  _stash_allowlisted .gitignore .reviewlooprc .refactorsuggestrc || _stash_rc=$?
+  if [[ "$_stash_rc" -eq 2 ]]; then
+    echo "Error: failed to stash allowlisted files" >&2
+    FINAL_STATUS="stash_error"
+    break
   fi
+  _allowed_dirty_stashed=$([[ "$_stash_rc" -eq 0 ]] && echo true || echo false)
 
   # ── Snapshot pre-fix working tree state ──────────────────────────
   PRE_FIX_STATE=$(_snapshot_worktree)
