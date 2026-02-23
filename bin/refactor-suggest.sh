@@ -326,7 +326,7 @@ if [[ "$SCOPE" == "auto" ]]; then
   _auto_tools="codex"
   [[ "$DRY_RUN" == false ]] && _auto_tools="claude codex"
   if ! SCOPE=$(_resolve_auto_scope "$_auto_tools"); then
-    echo "Error: auto scope resolution failed — budget insufficient."
+    echo "Error: auto scope resolution failed — budget insufficient." >&2
     exit 1
   fi
   echo "Auto scope resolved to: $SCOPE"
