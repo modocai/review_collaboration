@@ -319,7 +319,7 @@ _resolve_auto_scope() {
     [[ "$_pct" == "null" ]] && _pct=0
     [[ "$_7d" == "null" ]] && _7d=0
 
-    # 7d exhausted → fatal
+    # 7d exhausted → fatal (per-tool for clear error message)
     if [[ "$_7d" -ge 100 ]]; then
       echo "Error: $_tool 7-day budget exhausted (${_7d}%)." >&2
       return 1
@@ -329,13 +329,20 @@ _resolve_auto_scope() {
     [[ "$_7d" -gt "$_max_7d" ]] && _max_7d="$_7d"
   done
 
-  if [[ "$_max_pct" -ge 90 ]]; then
-    echo "Error: budget too low for any scope (${_max_pct}% used in 5h window)." >&2
-    return 1
-  elif [[ "$_max_pct" -ge 75 ]] || [[ "$_max_7d" -ge 90 ]]; then
+  # Build worst-case budget JSON for shared policy check
+  local _worst_json
+  _worst_json=$(jq -n -c \
+    --argjson pct "$_max_pct" \
+    --argjson d7 "$_max_7d" \
+    '{five_hour_used_pct: $pct, seven_day_used_pct: $d7}')
+
+  if _budget_sufficient module "$_worst_json" 2>/dev/null; then
+    printf 'module'
+  elif _budget_sufficient micro "$_worst_json" 2>/dev/null; then
     printf 'micro'
   else
-    printf 'module'
+    echo "Error: budget too low for any scope (5h: ${_max_pct}%, 7d: ${_max_7d}%)." >&2
+    return 1
   fi
 }
 
