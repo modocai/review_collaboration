@@ -5,7 +5,27 @@ Every PR must pass the review loop (`review-loop.sh --dry-run`) before merging. 
 ## Branch Rules
 
 Always commit and push before ending work on any branch other than develop.
-Never commit directly to `main` or `develop`, nor force push to them. All changes must go through branch → PR → review before merge.
+Never commit directly to `main` or `develop`. All changes must go through branch → PR → review before merge.
+Never rebase or force-push `main` or `develop` — this destroys shared history.
+
+## PR Merge Process
+
+Before merging a PR, always fetch the target branch and check for new commits:
+
+```
+git fetch origin <target-branch>
+git log HEAD..origin/<target-branch> --oneline
+```
+
+**A) Target branch has new commits:**
+1. Merge the target branch into your feature branch (`git merge origin/<target-branch>`)
+2. Resolve conflicts if any
+3. Push the merge commit
+4. Re-run the review loop — the merged code must pass review again
+
+**B) Target branch is up to date:**
+1. Merge the PR (`gh pr merge --merge --delete-branch`)
+2. Switch to the target branch, pull, and delete the local feature branch
 
 ## Commit Messages
 
