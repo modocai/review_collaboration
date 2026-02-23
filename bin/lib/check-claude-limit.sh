@@ -237,18 +237,12 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   echo "  micro:  <90%   module: <75%   layer: TBD    full: TBD"
   echo ""
 
-  # Show go/no-go for each scope (reuse _pct to avoid redundant API calls)
-  _thresholds="micro:90 module:75"
-  for _entry in $_thresholds; do
-    _s="${_entry%%:*}"
-    _thr="${_entry##*:}"
-    if [[ "$_weekly_pct" != "null" ]] && [[ "$_weekly_pct" -ge 100 ]]; then
-      printf '  %-8s NO-GO (7d exhausted)\n' "$_s:"
-    elif [[ "$_weekly_pct" != "null" ]] && [[ "$_weekly_pct" -ge 90 ]] && [[ "$_thr" -le 75 ]]; then
-      printf '  %-8s NO-GO (7d %s%%)\n' "$_s:" "$_weekly_pct"
-    elif [[ "$_pct" == "null" ]]; then
-      printf '  %-8s GO    (no data — assuming OK)\n' "$_s:"
-    elif [[ "$_pct" -lt "$_thr" ]]; then
+  # Show go/no-go for each scope (reuse _json to avoid redundant API calls).
+  # Source common.sh for _budget_sufficient (include guards prevent circular load).
+  _BUDGET_POLICY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  source "$_BUDGET_POLICY_DIR/common.sh"
+  for _s in micro module; do
+    if _budget_sufficient "$_s" "$_json"; then
       printf '  %-8s GO\n' "$_s:"
     else
       printf '  %-8s NO-GO\n' "$_s:"
