@@ -157,40 +157,90 @@ _wait_for_budget_fetch() {
   esac
 }
 
+# ── Stream-JSON Result Extraction ────────────────────────────────────
+# Extract final result text from a Claude stream-json event log.
+# $1 = stream file path
+# stdout: result text (empty if not found)
+_extract_result_from_stream() {
+  local _stream="$1"
+  [[ -s "$_stream" ]] || return 0
+  # stream-json's last result event contains the final text output
+  grep '"type"[[:space:]]*:[[:space:]]*"result"' "$_stream" | tail -1 \
+    | jq -r '.result // empty' 2>/dev/null || true
+}
+
 # ── Claude CLI Retry Wrapper ─────────────────────────────────────────
 # Caches stdin and retries the command with exponential backoff.
 # $1 = output file, $2 = label (for logging), $3... = command + args
 # stdin → piped to command (cached for retries)
 # return 0 = success, return 1 = permanent/unknown error or timeout
+#
+# When DIAGNOSTIC_LOG=true, appends --output-format stream-json and saves
+# the full event stream to a sidecar .stream.jsonl file for diagnosis.
+# The plain-text result is still written to $_output for pipeline compat.
 _retry_claude_cmd() {
   local _output="$1" _label="$2"; shift 2
   local _max_wait="${RETRY_MAX_WAIT:-600}"
   local _wait="${RETRY_INITIAL_WAIT:-30}"
   local _elapsed=0 _attempt=1 _rc _class
 
+  # Diagnostic logging: save full event stream to sidecar file
+  local _diag="${DIAGNOSTIC_LOG:-false}"
+  local _stream_file="" _stderr_file=""
+
   # Cache stdin for replay on retries
   local _stdin_cache
   _stdin_cache=$(mktemp)
-  trap 'rm -f "$_stdin_cache"' RETURN
+  if [[ "$_diag" == true ]]; then
+    _stream_file="${_output%.*}.stream.jsonl"
+    _stderr_file=$(mktemp)
+    trap 'rm -f "$_stdin_cache" "$_stderr_file"' RETURN
+  else
+    trap 'rm -f "$_stdin_cache"' RETURN
+  fi
   cat > "$_stdin_cache"
 
   while true; do
     _rc=0
-    cat "$_stdin_cache" | "$@" > "$_output" 2>&1 || _rc=$?
+    if [[ "$_diag" == true ]]; then
+      cat "$_stdin_cache" | "$@" --output-format stream-json \
+        > "$_stream_file" 2>"$_stderr_file" || _rc=$?
+    else
+      cat "$_stdin_cache" | "$@" > "$_output" 2>&1 || _rc=$?
+    fi
 
     if [[ "$_rc" -eq 0 ]]; then
+      if [[ "$_diag" == true ]]; then
+        _extract_result_from_stream "$_stream_file" > "$_output"
+        if [[ ! -s "$_output" ]]; then
+          echo "  [$_label] Warning: stream-json result extraction produced empty output." >&2
+          echo "  Check sidecar file: $_stream_file" >&2
+        fi
+      fi
       return 0
     fi
 
-    _class=$(_classify_cli_error "$_output" "$_rc")
+    # Error classification: use stderr in diagnostic mode (stream-json
+    # doesn't contain CLI error messages), otherwise use combined output
+    if [[ "$_diag" == true ]]; then
+      _class=$(_classify_cli_error "$_stderr_file" "$_rc")
+    else
+      _class=$(_classify_cli_error "$_output" "$_rc")
+    fi
 
     if [[ "$_class" != "transient" ]]; then
       echo "  [$_label] Non-transient error ($_class, exit=$_rc). Giving up." >&2
+      if [[ "$_diag" == true ]]; then
+        cat "$_stderr_file" > "$_output"
+      fi
       return 1
     fi
 
     if [[ "$_elapsed" -ge "$_max_wait" ]]; then
       echo "  [$_label] Retry timeout (${_elapsed}/${_max_wait}s). Giving up." >&2
+      if [[ "$_diag" == true ]]; then
+        cat "$_stderr_file" > "$_output"
+      fi
       return 1
     fi
 

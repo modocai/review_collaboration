@@ -253,6 +253,7 @@ Options:
   --max-subloop <N>         Maximum sub-iterations (default: 4)
   --dry-run                 Review only, do not apply re-fixes
   --fix-nits                Also fix nits and potential issues in changed files
+  --diagnostic-log          Save full Claude event stream to .stream.jsonl sidecar files
   --refactoring-plan <file> Load refactoring_plan from JSON file (scope context)
   --log-dir <dir>           Log directory (default: temporary directory)
   --iteration <N>           Iteration number for log filenames (default: 1)
@@ -275,6 +276,7 @@ EOF
         _MAX_SUBLOOP="$2"; shift 2 ;;
       --dry-run)         _DRY_RUN=true; shift ;;
       --fix-nits)        _FIX_NITS=true; shift ;;
+      --diagnostic-log)  DIAGNOSTIC_LOG=true; shift ;;
       --refactoring-plan)
         if [[ $# -lt 2 ]]; then echo "Error: '$1' requires an argument."; usage 1; fi
         _REFACTORING_PLAN_FILE="$2"; shift 2 ;;
@@ -323,7 +325,7 @@ EOF
   # Set globals
   CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
   TARGET_BRANCH="${_TARGET:-$CURRENT_BRANCH}"
-  export CURRENT_BRANCH TARGET_BRANCH
+  export CURRENT_BRANCH TARGET_BRANCH DIAGNOSTIC_LOG
 
   # Determine review mode: dirty working tree or branch diff
   _BRANCH_DIFF_MODE=false
