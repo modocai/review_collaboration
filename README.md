@@ -84,11 +84,12 @@ review-loop.sh [OPTIONS]
 
 Options:
   -t, --target <branch>    Target branch to diff against (default: develop)
-  -n, --max-loop <N>       Maximum review-fix iterations (required)
+  -n, --max-loop <N>       Maximum review-fix iterations (required, unless --resume)
   --max-subloop <N>        Maximum self-review sub-iterations per fix (default: 4)
   --no-self-review         Disable self-review (equivalent to --max-subloop 0)
   --dry-run                Run review only, do not fix
   --no-auto-commit         Fix but do not commit/push (single iteration)
+  --resume                 Resume from a previously interrupted run (reuses existing logs)
   -V, --version            Show version
   -h, --help               Show this help message
 
@@ -97,6 +98,7 @@ Examples:
   review-loop.sh -n 5                  # diff against develop, max 5 loops
   review-loop.sh -n 1 --dry-run        # single review, no fixes
   review-loop.sh -n 3 --no-self-review # disable self-review sub-loop
+  review-loop.sh --resume              # resume an interrupted run
   review-loop.sh --version             # print version
 ```
 
@@ -110,13 +112,14 @@ refactor-suggest.sh [OPTIONS]
 Options:
   --scope <scope>          Refactoring scope: auto|micro|module|layer|full (default: auto)
   -t, --target <branch>    Target branch to base from (default: develop)
-  -n, --max-loop <N>       Maximum analysis-fix iterations (required)
+  -n, --max-loop <N>       Maximum analysis-fix iterations (default: 1)
   --max-subloop <N>        Maximum self-review sub-iterations per fix (default: 4)
   --no-self-review         Disable self-review (equivalent to --max-subloop 0)
   --dry-run                Run analysis only, do not apply fixes
   --no-dry-run             Force fixes even if .refactorsuggestrc sets DRY_RUN=true
   --auto-approve           Skip interactive confirmation for layer/full scope
   --create-pr              Create a draft PR after completing all iterations
+  --resume                 Resume from a previously interrupted run (reuses existing logs)
   --with-review            Run review-loop after PR creation (default: 4 iterations)
   --with-review-loops <N>  Set review-loop iteration count (implies --with-review)
   -V, --version            Show version
