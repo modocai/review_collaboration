@@ -212,6 +212,10 @@ _retry_claude_cmd() {
     if [[ "$_rc" -eq 0 ]]; then
       if [[ "$_diag" == true ]]; then
         _extract_result_from_stream "$_stream_file" > "$_output"
+        if [[ ! -s "$_output" ]]; then
+          echo "  [$_label] Warning: stream-json result extraction produced empty output." >&2
+          echo "  Check sidecar file: $_stream_file" >&2
+        fi
       fi
       return 0
     fi
