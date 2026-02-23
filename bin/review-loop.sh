@@ -140,15 +140,8 @@ if [[ -z "$MAX_LOOP" ]] && [[ "$RESUME" != true ]]; then
   usage 1
 fi
 
-if [[ -n "$MAX_LOOP" ]] && ! [[ "$MAX_LOOP" =~ ^[1-9][0-9]*$ ]]; then
-  echo "Error: --max-loop must be a positive integer, got '$MAX_LOOP'."
-  exit 1
-fi
-
-if ! [[ "$MAX_SUBLOOP" =~ ^(0|[1-9][0-9]*)$ ]]; then
-  echo "Error: --max-subloop must be a non-negative integer (no leading zeros), got '$MAX_SUBLOOP'."
-  exit 1
-fi
+[[ -n "$MAX_LOOP" ]] && _require_pos_int "--max-loop" "$MAX_LOOP"
+_require_nonneg_int "--max-subloop" "$MAX_SUBLOOP"
 
 # ── Prerequisite checks ──────────────────────────────────────────────
 _require_core

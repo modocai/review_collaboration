@@ -171,20 +171,9 @@ while [[ $# -gt 0 ]]; do
 done
 
 # ── Validation ────────────────────────────────────────────────────────
-if ! [[ "$MAX_LOOP" =~ ^[1-9][0-9]*$ ]]; then
-  echo "Error: --max-loop must be a positive integer, got '$MAX_LOOP'."
-  exit 1
-fi
-
-if ! [[ "$MAX_SUBLOOP" =~ ^(0|[1-9][0-9]*)$ ]]; then
-  echo "Error: --max-subloop must be a non-negative integer, got '$MAX_SUBLOOP'."
-  exit 1
-fi
-
-if ! [[ "$REVIEW_LOOPS" =~ ^[1-9][0-9]*$ ]]; then
-  echo "Error: --with-review-loops must be a positive integer, got '$REVIEW_LOOPS'."
-  exit 1
-fi
+_require_pos_int "--max-loop" "$MAX_LOOP"
+_require_nonneg_int "--max-subloop" "$MAX_SUBLOOP"
+_require_pos_int "--with-review-loops" "$REVIEW_LOOPS"
 
 case "$SCOPE" in
   auto|micro|module|layer|full) ;;

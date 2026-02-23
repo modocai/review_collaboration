@@ -32,6 +32,22 @@ _require_core() {
   fi
 }
 
+# ── Integer Validation ──────────────────────────────────────────────
+# $1 = option name (for error message), $2 = value
+_require_pos_int() {
+  if ! [[ "$2" =~ ^[1-9][0-9]*$ ]]; then
+    echo "Error: $1 must be a positive integer, got '$2'."
+    exit 1
+  fi
+}
+
+_require_nonneg_int() {
+  if ! [[ "$2" =~ ^(0|[1-9][0-9]*)$ ]]; then
+    echo "Error: $1 must be a non-negative integer, got '$2'."
+    exit 1
+  fi
+}
+
 # ── SHA-256 hashing (portable) ──────────────────────────────────────
 sha256() {
   if command -v shasum &>/dev/null; then

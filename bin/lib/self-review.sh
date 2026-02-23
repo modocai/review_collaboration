@@ -288,15 +288,8 @@ EOF
   done
 
   # Validation
-  if ! [[ "$_MAX_SUBLOOP" =~ ^[1-9][0-9]*$ ]]; then
-    echo "Error: --max-subloop must be a positive integer, got '$_MAX_SUBLOOP'."
-    exit 1
-  fi
-
-  if ! [[ "$_ITERATION" =~ ^[1-9][0-9]*$ ]]; then
-    echo "Error: --iteration must be a positive integer, got '$_ITERATION'."
-    exit 1
-  fi
+  _require_pos_int "--max-subloop" "$_MAX_SUBLOOP"
+  _require_pos_int "--iteration" "$_ITERATION"
 
   if [[ -n "$_REFACTORING_PLAN_FILE" ]] && [[ ! -f "$_REFACTORING_PLAN_FILE" ]]; then
     echo "Error: refactoring plan file not found: $_REFACTORING_PLAN_FILE"
