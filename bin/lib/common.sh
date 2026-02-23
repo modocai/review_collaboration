@@ -20,6 +20,34 @@ check_cmd() {
   fi
 }
 
+# Core prerequisites shared by all entrypoints.
+_require_core() {
+  check_cmd git
+  check_cmd jq
+  check_cmd envsubst
+  check_cmd perl
+  if ! git rev-parse --is-inside-work-tree &>/dev/null; then
+    echo "Error: not inside a git repository."
+    exit 1
+  fi
+}
+
+# ── Integer Validation ──────────────────────────────────────────────
+# $1 = option name (for error message), $2 = value
+_require_pos_int() {
+  if ! [[ "$2" =~ ^[1-9][0-9]*$ ]]; then
+    echo "Error: $1 must be a positive integer, got '$2'."
+    exit 1
+  fi
+}
+
+_require_nonneg_int() {
+  if ! [[ "$2" =~ ^(0|[1-9][0-9]*)$ ]]; then
+    echo "Error: $1 must be a non-negative integer, got '$2'."
+    exit 1
+  fi
+}
+
 # ── SHA-256 hashing (portable) ──────────────────────────────────────
 sha256() {
   if command -v shasum &>/dev/null; then
@@ -118,6 +146,26 @@ _extract_json_from_file() {
   fi
   if [[ -z "$_json" ]] || ! printf '%s' "$_json" | jq empty 2>/dev/null; then
     return 1
+  fi
+  printf '%s' "$_json"
+}
+
+# Wrapper: parse review JSON with standardized warnings.
+# $1 = file path, $2 = label (e.g. "review", "analysis", "self-review")
+# stdout = parsed JSON; stderr = warnings on failure.
+# Returns: 0 success, 1 parse error, 2 file not found.
+_parse_review_json() {
+  local _file="$1" _label="$2" _rc=0
+  local _json
+  _json=$(_extract_json_from_file "$_file") || _rc=$?
+  if [[ $_rc -ne 0 ]]; then
+    if [[ $_rc -eq 2 ]]; then
+      echo "  Warning: $_label output file not found ($_file)." >&2
+    else
+      echo "  Warning: could not parse $_label output as JSON." >&2
+    fi
+    echo "  See $_file for details." >&2
+    return $_rc
   fi
   printf '%s' "$_json"
 }
@@ -381,62 +429,4 @@ _generate_summary() {
     done
   } > "$SUMMARY_FILE"
   printf '%s' "$SUMMARY_FILE"
-}
-
-# ── PR Commenting ────────────────────────────────────────────────────
-# Post iteration summary as PR comment.
-# Reads globals: PR_NUMBER, REVIEW_JSON, OVERALL, FINDINGS_COUNT,
-#   FIX_FILE, OPINION_FILE, SELF_REVIEW_SUMMARY, MAX_SUBLOOP, MAX_LOOP, i
-_post_pr_comment() {
-  [[ -n "$PR_NUMBER" ]] || return 0
-  echo "[$(date +%H:%M:%S)] Posting PR comment..."
-
-  local FINDINGS_TABLE FIX_SUMMARY COMMENT_BODY_FILE
-
-  FINDINGS_TABLE=$(printf '%s' "$REVIEW_JSON" | jq -r '
-    .findings[] |
-    "| \(.title) | \(.confidence_score) | `\(.code_location.file_path):\(.code_location.line_range.start)` |"
-  ')
-
-  FIX_SUMMARY=""
-  if [[ -f "$FIX_FILE" ]]; then
-    FIX_SUMMARY=$(sed -n '/^## Fix Summary/,/^## /{ /^## Fix Summary/d; /^## /d; p; }' "$FIX_FILE")
-    if [[ -z "$FIX_SUMMARY" ]]; then
-      FIX_SUMMARY=$(sed -n '/^## Fix Summary/,${ /^## Fix Summary/d; p; }' "$FIX_FILE")
-    fi
-  fi
-
-  COMMENT_BODY_FILE=$(mktemp)
-
-  printf '### AI Review — Iteration %d / %d\n\n' "$i" "$MAX_LOOP" > "$COMMENT_BODY_FILE"
-  printf '**Overall**: %s (%s findings)\n\n' "$OVERALL" "$FINDINGS_COUNT" >> "$COMMENT_BODY_FILE"
-
-  printf '<details>\n<summary>Review Findings</summary>\n\n' >> "$COMMENT_BODY_FILE"
-  printf '| Finding | Confidence | Location |\n' >> "$COMMENT_BODY_FILE"
-  printf '|---------|-----------|----------|\n' >> "$COMMENT_BODY_FILE"
-  printf '%s\n' "$FINDINGS_TABLE" >> "$COMMENT_BODY_FILE"
-  printf '\n</details>\n\n' >> "$COMMENT_BODY_FILE"
-
-  printf '<details>\n<summary>Fix Actions</summary>\n\n' >> "$COMMENT_BODY_FILE"
-  printf '%s\n' "$FIX_SUMMARY" >> "$COMMENT_BODY_FILE"
-  printf '\n</details>\n' >> "$COMMENT_BODY_FILE"
-
-  if [[ -f "$OPINION_FILE" ]] && [[ -s "$OPINION_FILE" ]]; then
-    printf '\n<details>\n<summary>Claude Opinion</summary>\n\n' >> "$COMMENT_BODY_FILE"
-    head -c 2000 "$OPINION_FILE" >> "$COMMENT_BODY_FILE"
-    printf '\n\n</details>\n' >> "$COMMENT_BODY_FILE"
-  fi
-
-  if [[ -n "$SELF_REVIEW_SUMMARY" ]]; then
-    printf '\n<details>\n<summary>Self-Review (%d max sub-iterations)</summary>\n\n' "$MAX_SUBLOOP" >> "$COMMENT_BODY_FILE"
-    printf '%b\n' "$SELF_REVIEW_SUMMARY" >> "$COMMENT_BODY_FILE"
-    printf '</details>\n' >> "$COMMENT_BODY_FILE"
-  fi
-
-  if gh pr comment "$PR_NUMBER" --body-file "$COMMENT_BODY_FILE"; then
-    echo "  PR comment posted."
-  else
-    echo "  Warning: failed to post PR comment (non-fatal)."
-  fi
-  rm -f "$COMMENT_BODY_FILE"
 }

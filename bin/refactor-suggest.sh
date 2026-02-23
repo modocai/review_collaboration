@@ -9,7 +9,7 @@ source "$SCRIPT_DIR/lib/common.sh"
 source "$SCRIPT_DIR/lib/self-review.sh"
 
 # ── Defaults ──────────────────────────────────────────────────────────
-SCOPE="micro"
+SCOPE="auto"
 TARGET_BRANCH="develop"
 MAX_LOOP="1"
 MAX_SUBLOOP=4
@@ -22,7 +22,7 @@ _TARGET_BRANCH_EXPLICIT=false
 _SCOPE_EXPLICIT=false
 WITH_REVIEW=false
 REVIEW_LOOPS=4
-RETRY_MAX_WAIT=600
+RETRY_MAX_WAIT=7200
 RETRY_INITIAL_WAIT=30
 BUDGET_SCOPE="module"
 DIAGNOSTIC_LOG=false
@@ -47,8 +47,8 @@ if [[ -n "$_GIT_ROOT" && -f "$_GIT_ROOT/$REFACTORSUGGESTRC" ]]; then
       fi
       if [[ "$_rc_key" == "SCOPE" ]]; then
         case "$_rc_val" in
-          micro|module|layer|full) ;;
-          *) echo "Error: SCOPE must be one of: micro, module, layer, full. Got '$_rc_val' (in .refactorsuggestrc)." >&2; exit 1 ;;
+          auto|micro|module|layer|full) ;;
+          *) echo "Error: SCOPE must be one of: auto, micro, module, layer, full. Got '$_rc_val' (in .refactorsuggestrc)." >&2; exit 1 ;;
         esac
       fi
       # Validate numeric retry values
@@ -92,7 +92,7 @@ usage() {
 Usage: refactor-suggest.sh [OPTIONS]
 
 Options:
-  --scope <scope>          Refactoring scope: micro|module|layer|full (default: micro)
+  --scope <scope>          Refactoring scope: auto|micro|module|layer|full (default: auto)
   -t, --target <branch>    Target branch to base from (default: develop)
   -n, --max-loop <N>       Maximum analysis-fix iterations (default: 1)
   --max-subloop <N>        Maximum self-review sub-iterations per fix (default: 4)
@@ -109,6 +109,7 @@ Options:
   -h, --help               Show this help message
 
 Scopes:
+  auto     Pick largest feasible scope based on token budget (default)
   micro    Function/file-level improvements (low blast radius)
   module   Duplication removal, module boundary cleanup (low-medium)
   layer    Cross-cutting concerns across modules (medium-high)
@@ -126,6 +127,7 @@ Flow:
   9. (--with-review) Run review-loop on the new PR
 
 Examples:
+  refactor-suggest.sh -n 3                          # auto scope
   refactor-suggest.sh --scope micro -n 3
   refactor-suggest.sh --scope module -n 2 --dry-run
   refactor-suggest.sh --scope layer -n 1 --auto-approve
@@ -169,24 +171,13 @@ while [[ $# -gt 0 ]]; do
 done
 
 # ── Validation ────────────────────────────────────────────────────────
-if ! [[ "$MAX_LOOP" =~ ^[1-9][0-9]*$ ]]; then
-  echo "Error: --max-loop must be a positive integer, got '$MAX_LOOP'."
-  exit 1
-fi
-
-if ! [[ "$MAX_SUBLOOP" =~ ^(0|[1-9][0-9]*)$ ]]; then
-  echo "Error: --max-subloop must be a non-negative integer, got '$MAX_SUBLOOP'."
-  exit 1
-fi
-
-if ! [[ "$REVIEW_LOOPS" =~ ^[1-9][0-9]*$ ]]; then
-  echo "Error: --with-review-loops must be a positive integer, got '$REVIEW_LOOPS'."
-  exit 1
-fi
+_require_pos_int "--max-loop" "$MAX_LOOP"
+_require_nonneg_int "--max-subloop" "$MAX_SUBLOOP"
+_require_pos_int "--with-review-loops" "$REVIEW_LOOPS"
 
 case "$SCOPE" in
-  micro|module|layer|full) ;;
-  *) echo "Error: --scope must be one of: micro, module, layer, full. Got '$SCOPE'."; exit 1 ;;
+  auto|micro|module|layer|full) ;;
+  *) echo "Error: --scope must be one of: auto, micro, module, layer, full. Got '$SCOPE'."; exit 1 ;;
 esac
 
 if [[ "$WITH_REVIEW" == true ]]; then
@@ -194,23 +185,14 @@ if [[ "$WITH_REVIEW" == true ]]; then
 fi
 
 # ── Prerequisite checks ──────────────────────────────────────────────
-check_cmd git
+_require_core
 check_cmd codex
 if [[ "$DRY_RUN" == false ]]; then
   check_cmd claude
 fi
-check_cmd jq
-check_cmd envsubst
-check_cmd perl
 
 if [[ "$CREATE_PR" == true ]] && [[ "$HAS_GH" == false ]] && [[ "$DRY_RUN" == false ]]; then
   echo "Error: --create-pr requires 'gh' CLI."
-  exit 1
-fi
-
-# ── Git checks ────────────────────────────────────────────────────────
-if ! git rev-parse --is-inside-work-tree &>/dev/null; then
-  echo "Error: not inside a git repository."
   exit 1
 fi
 
@@ -302,13 +284,7 @@ fi
 
 CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 
-# ── Prompt validation ─────────────────────────────────────────────────
-CODEX_PROMPT_FILE="codex-refactor-${SCOPE}.prompt.md"
-if [[ ! -f "$PROMPTS_DIR/$CODEX_PROMPT_FILE" ]]; then
-  echo "Error: required prompt not found: $PROMPTS_DIR/$CODEX_PROMPT_FILE" >&2
-  exit 1
-fi
-
+# ── Prompt validation (scope-independent) ────────────────────────────
 if [[ "$DRY_RUN" == false ]]; then
   if [[ ! -f "$PROMPTS_DIR/claude-refactor-fix.prompt.md" ]]; then
     echo "Error: required prompt not found: $PROMPTS_DIR/claude-refactor-fix.prompt.md" >&2
@@ -323,6 +299,63 @@ fi
 if [[ "$MAX_SUBLOOP" -gt 0 ]] && [[ ! -f "$PROMPTS_DIR/claude-self-review.prompt.md" ]]; then
   echo "Warning: self-review prompt not found — disabling self-review."
   MAX_SUBLOOP=0
+fi
+
+# ── Budget-Aware Scope Resolution ────────────────────────────────────
+# Resolve "auto" scope to "micro" or "module" based on token budgets.
+# $1 = tool list (space-separated, e.g. "claude codex" or "claude")
+# stdout: "micro" | "module"
+# return 1 = budget insufficient for any scope
+_resolve_auto_scope() {
+  local _tools="${1:-claude codex}"
+  local _max_pct=0 _max_7d=0 _tool _json _pct _7d
+
+  for _tool in $_tools; do
+    _json=$(_wait_for_budget_fetch "$_tool")
+
+    _pct=$(printf '%s' "$_json" | jq -r '.five_hour_used_pct // 0')
+    _7d=$(printf '%s' "$_json" | jq -r '.seven_day_used_pct // 0')
+
+    [[ "$_pct" == "null" ]] && _pct=0
+    [[ "$_7d" == "null" ]] && _7d=0
+
+    # 7d exhausted → fatal
+    if [[ "$_7d" -ge 100 ]]; then
+      echo "Error: $_tool 7-day budget exhausted (${_7d}%)." >&2
+      return 1
+    fi
+
+    [[ "$_pct" -gt "$_max_pct" ]] && _max_pct="$_pct"
+    [[ "$_7d" -gt "$_max_7d" ]] && _max_7d="$_7d"
+  done
+
+  if [[ "$_max_pct" -ge 90 ]]; then
+    echo "Error: budget too low for any scope (${_max_pct}% used in 5h window)." >&2
+    return 1
+  elif [[ "$_max_pct" -ge 75 ]] || [[ "$_max_7d" -ge 90 ]]; then
+    printf 'micro'
+  else
+    printf 'module'
+  fi
+}
+
+# ── Auto scope resolution ─────────────────────────────────────────────
+if [[ "$SCOPE" == "auto" ]]; then
+  _auto_tools="codex"
+  [[ "$DRY_RUN" == false ]] && _auto_tools="claude codex"
+  if ! SCOPE=$(_resolve_auto_scope "$_auto_tools"); then
+    echo "Error: auto scope resolution failed — budget insufficient." >&2
+    exit 1
+  fi
+  echo "Auto scope resolved to: $SCOPE"
+  unset _auto_tools
+fi
+
+# ── Prompt validation (scope-dependent) ──────────────────────────────
+CODEX_PROMPT_FILE="codex-refactor-${SCOPE}.prompt.md"
+if [[ ! -f "$PROMPTS_DIR/$CODEX_PROMPT_FILE" ]]; then
+  echo "Error: required prompt not found: $PROMPTS_DIR/$CODEX_PROMPT_FILE" >&2
+  exit 1
 fi
 
 # ── Branch creation ───────────────────────────────────────────────────
@@ -534,15 +567,7 @@ for (( i=1; i<=MAX_LOOP; i++ )); do
   fi
 
   # ── b. Extract JSON from response ────────────────────────────────
-  _rc=0
-  REVIEW_JSON=$(_extract_json_from_file "$REVIEW_FILE") || _rc=$?
-  if [[ $_rc -ne 0 ]]; then
-    if [[ $_rc -eq 2 ]]; then
-      echo "Warning: analysis output file not found ($REVIEW_FILE). Codex may have failed."
-    else
-      echo "Warning: could not parse analysis output as JSON."
-    fi
-    echo "  See $REVIEW_FILE for details."
+  if ! REVIEW_JSON=$(_parse_review_json "$REVIEW_FILE" "analysis"); then
     FINAL_STATUS="parse_error"
     break
   fi
