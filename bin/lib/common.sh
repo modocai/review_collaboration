@@ -178,7 +178,7 @@ _changed_files_since_snapshot() {
 # return 1 = budget insufficient for any scope
 _resolve_auto_scope() {
   local _tools="${1:-claude codex}"
-  local _max_pct=0 _tool _json _pct _7d
+  local _max_pct=0 _max_7d=0 _tool _json _pct _7d
 
   for _tool in $_tools; do
     _json=$(_wait_for_budget_fetch "$_tool")
@@ -196,12 +196,13 @@ _resolve_auto_scope() {
     fi
 
     [[ "$_pct" -gt "$_max_pct" ]] && _max_pct="$_pct"
+    [[ "$_7d" -gt "$_max_7d" ]] && _max_7d="$_7d"
   done
 
   if [[ "$_max_pct" -ge 90 ]]; then
     echo "Error: budget too low for any scope (${_max_pct}% used in 5h window)." >&2
     return 1
-  elif [[ "$_max_pct" -ge 75 ]]; then
+  elif [[ "$_max_pct" -ge 75 ]] || [[ "$_max_7d" -ge 90 ]]; then
     printf 'micro'
   else
     printf 'module'
