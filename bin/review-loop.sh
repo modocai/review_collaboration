@@ -151,22 +151,14 @@ if ! [[ "$MAX_SUBLOOP" =~ ^(0|[1-9][0-9]*)$ ]]; then
 fi
 
 # ── Prerequisite checks ──────────────────────────────────────────────
-check_cmd git
+_require_core
 check_cmd codex
 if [[ "$DRY_RUN" == false ]]; then
   check_cmd claude
 fi
-check_cmd jq
-check_cmd envsubst
-check_cmd perl
 
 if [[ "$HAS_GH" == false ]]; then
   echo "Warning: 'gh' is not installed — PR commenting will be disabled."
-fi
-
-if ! git rev-parse --is-inside-work-tree &>/dev/null; then
-  echo "Error: not inside a git repository."
-  exit 1
 fi
 
 if [[ "$RESUME" != true ]]; then
@@ -276,6 +268,64 @@ if [[ "$MAX_SUBLOOP" -gt 0 ]] && [[ ! -f "$PROMPTS_DIR/claude-self-review.prompt
   echo "Warning: self-review prompt not found at $PROMPTS_DIR/claude-self-review.prompt.md — disabling self-review."
   MAX_SUBLOOP=0
 fi
+
+# ── PR Commenting ────────────────────────────────────────────────────
+# Post iteration summary as PR comment.
+# Reads globals: PR_NUMBER, REVIEW_JSON, OVERALL, FINDINGS_COUNT,
+#   FIX_FILE, OPINION_FILE, SELF_REVIEW_SUMMARY, MAX_SUBLOOP, MAX_LOOP, i
+_post_pr_comment() {
+  [[ -n "$PR_NUMBER" ]] || return 0
+  echo "[$(date +%H:%M:%S)] Posting PR comment..."
+
+  local FINDINGS_TABLE FIX_SUMMARY COMMENT_BODY_FILE
+
+  FINDINGS_TABLE=$(printf '%s' "$REVIEW_JSON" | jq -r '
+    .findings[] |
+    "| \(.title) | \(.confidence_score) | `\(.code_location.file_path):\(.code_location.line_range.start)` |"
+  ')
+
+  FIX_SUMMARY=""
+  if [[ -f "$FIX_FILE" ]]; then
+    FIX_SUMMARY=$(sed -n '/^## Fix Summary/,/^## /{ /^## Fix Summary/d; /^## /d; p; }' "$FIX_FILE")
+    if [[ -z "$FIX_SUMMARY" ]]; then
+      FIX_SUMMARY=$(sed -n '/^## Fix Summary/,${ /^## Fix Summary/d; p; }' "$FIX_FILE")
+    fi
+  fi
+
+  COMMENT_BODY_FILE=$(mktemp)
+
+  printf '### AI Review — Iteration %d / %d\n\n' "$i" "$MAX_LOOP" > "$COMMENT_BODY_FILE"
+  printf '**Overall**: %s (%s findings)\n\n' "$OVERALL" "$FINDINGS_COUNT" >> "$COMMENT_BODY_FILE"
+
+  printf '<details>\n<summary>Review Findings</summary>\n\n' >> "$COMMENT_BODY_FILE"
+  printf '| Finding | Confidence | Location |\n' >> "$COMMENT_BODY_FILE"
+  printf '|---------|-----------|----------|\n' >> "$COMMENT_BODY_FILE"
+  printf '%s\n' "$FINDINGS_TABLE" >> "$COMMENT_BODY_FILE"
+  printf '\n</details>\n\n' >> "$COMMENT_BODY_FILE"
+
+  printf '<details>\n<summary>Fix Actions</summary>\n\n' >> "$COMMENT_BODY_FILE"
+  printf '%s\n' "$FIX_SUMMARY" >> "$COMMENT_BODY_FILE"
+  printf '\n</details>\n' >> "$COMMENT_BODY_FILE"
+
+  if [[ -f "$OPINION_FILE" ]] && [[ -s "$OPINION_FILE" ]]; then
+    printf '\n<details>\n<summary>Claude Opinion</summary>\n\n' >> "$COMMENT_BODY_FILE"
+    head -c 2000 "$OPINION_FILE" >> "$COMMENT_BODY_FILE"
+    printf '\n\n</details>\n' >> "$COMMENT_BODY_FILE"
+  fi
+
+  if [[ -n "$SELF_REVIEW_SUMMARY" ]]; then
+    printf '\n<details>\n<summary>Self-Review (%d max sub-iterations)</summary>\n\n' "$MAX_SUBLOOP" >> "$COMMENT_BODY_FILE"
+    printf '%b\n' "$SELF_REVIEW_SUMMARY" >> "$COMMENT_BODY_FILE"
+    printf '</details>\n' >> "$COMMENT_BODY_FILE"
+  fi
+
+  if gh pr comment "$PR_NUMBER" --body-file "$COMMENT_BODY_FILE"; then
+    echo "  PR comment posted."
+  else
+    echo "  Warning: failed to post PR comment (non-fatal)."
+  fi
+  rm -f "$COMMENT_BODY_FILE"
+}
 
 # ── Cleanup trap ──────────────────────────────────────────────────────
 # Restore allowlisted stash on any exit (set -e, signals, etc.) so that

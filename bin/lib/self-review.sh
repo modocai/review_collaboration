@@ -304,16 +304,8 @@ EOF
   fi
 
   # Prerequisites
-  check_cmd git
+  _require_core
   check_cmd claude
-  check_cmd jq
-  check_cmd envsubst
-  check_cmd perl
-
-  if ! git rev-parse --is-inside-work-tree &>/dev/null; then
-    echo "Error: not inside a git repository."
-    exit 1
-  fi
 
   # Set globals
   CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)

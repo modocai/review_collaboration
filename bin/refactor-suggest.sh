@@ -196,23 +196,14 @@ if [[ "$WITH_REVIEW" == true ]]; then
 fi
 
 # ── Prerequisite checks ──────────────────────────────────────────────
-check_cmd git
+_require_core
 check_cmd codex
 if [[ "$DRY_RUN" == false ]]; then
   check_cmd claude
 fi
-check_cmd jq
-check_cmd envsubst
-check_cmd perl
 
 if [[ "$CREATE_PR" == true ]] && [[ "$HAS_GH" == false ]] && [[ "$DRY_RUN" == false ]]; then
   echo "Error: --create-pr requires 'gh' CLI."
-  exit 1
-fi
-
-# ── Git checks ────────────────────────────────────────────────────────
-if ! git rev-parse --is-inside-work-tree &>/dev/null; then
-  echo "Error: not inside a git repository."
   exit 1
 fi
 
@@ -320,6 +311,44 @@ if [[ "$MAX_SUBLOOP" -gt 0 ]] && [[ ! -f "$PROMPTS_DIR/claude-self-review.prompt
   echo "Warning: self-review prompt not found — disabling self-review."
   MAX_SUBLOOP=0
 fi
+
+# ── Budget-Aware Scope Resolution ────────────────────────────────────
+# Resolve "auto" scope to "micro" or "module" based on token budgets.
+# $1 = tool list (space-separated, e.g. "claude codex" or "claude")
+# stdout: "micro" | "module"
+# return 1 = budget insufficient for any scope
+_resolve_auto_scope() {
+  local _tools="${1:-claude codex}"
+  local _max_pct=0 _max_7d=0 _tool _json _pct _7d
+
+  for _tool in $_tools; do
+    _json=$(_wait_for_budget_fetch "$_tool")
+
+    _pct=$(printf '%s' "$_json" | jq -r '.five_hour_used_pct // 0')
+    _7d=$(printf '%s' "$_json" | jq -r '.seven_day_used_pct // 0')
+
+    [[ "$_pct" == "null" ]] && _pct=0
+    [[ "$_7d" == "null" ]] && _7d=0
+
+    # 7d exhausted → fatal
+    if [[ "$_7d" -ge 100 ]]; then
+      echo "Error: $_tool 7-day budget exhausted (${_7d}%)." >&2
+      return 1
+    fi
+
+    [[ "$_pct" -gt "$_max_pct" ]] && _max_pct="$_pct"
+    [[ "$_7d" -gt "$_max_7d" ]] && _max_7d="$_7d"
+  done
+
+  if [[ "$_max_pct" -ge 90 ]]; then
+    echo "Error: budget too low for any scope (${_max_pct}% used in 5h window)." >&2
+    return 1
+  elif [[ "$_max_pct" -ge 75 ]] || [[ "$_max_7d" -ge 90 ]]; then
+    printf 'micro'
+  else
+    printf 'module'
+  fi
+}
 
 # ── Auto scope resolution ─────────────────────────────────────────────
 if [[ "$SCOPE" == "auto" ]]; then
