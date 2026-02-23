@@ -525,10 +525,14 @@ EOF
   # These files may be dirty from the installer or user edits.  Stash them
   # before snapshotting so they are excluded from Claude's commit even if
   # Claude happens to modify the same file.
-  _allowed_dirty_stashed=false
-  if _stash_allowlisted .gitignore .reviewlooprc .refactorsuggestrc; then
-    _allowed_dirty_stashed=true
+  _stash_rc=0
+  _stash_allowlisted .gitignore .reviewlooprc .refactorsuggestrc || _stash_rc=$?
+  if [[ "$_stash_rc" -eq 2 ]]; then
+    echo "Error: failed to stash allowlisted files" >&2
+    FINAL_STATUS="stash_error"
+    break
   fi
+  _allowed_dirty_stashed=$([[ "$_stash_rc" -eq 0 ]] && echo true || echo false)
 
   # ── Snapshot pre-fix working tree state ──────────────────────────
   PRE_FIX_STATE=$(_snapshot_worktree)
