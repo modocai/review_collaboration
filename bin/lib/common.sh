@@ -32,7 +32,7 @@ _budget_sufficient() {
 
   # Check 7-day window first — exhausted=always NO-GO, >=90%=module+ NO-GO
   _7d_pct=$(printf '%s' "$_budget_json" | jq -r '.seven_day_used_pct')
-  if [[ "$_7d_pct" != "null" ]]; then
+  if [[ -n "$_7d_pct" ]] && [[ "$_7d_pct" != "null" ]]; then
     if [[ "$_7d_pct" -ge 100 ]]; then
       echo "Budget check failed: 7-day window ${_7d_pct}% used (exhausted)" >&2
       return 1
@@ -43,7 +43,7 @@ _budget_sufficient() {
     fi
   fi
 
-  if [[ "$_pct" == "null" ]]; then
+  if [[ -z "$_pct" ]] || [[ "$_pct" == "null" ]]; then
     echo "Notice: no budget data — assuming OK (first run or stale logs)" >&2
     return 0
   fi

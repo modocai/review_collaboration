@@ -316,8 +316,8 @@ _resolve_auto_scope() {
     _pct=$(printf '%s' "$_json" | jq -r '.five_hour_used_pct // 0')
     _7d=$(printf '%s' "$_json" | jq -r '.seven_day_used_pct // 0')
 
-    [[ "$_pct" == "null" ]] && _pct=0
-    [[ "$_7d" == "null" ]] && _7d=0
+    [[ -z "$_pct" || "$_pct" == "null" ]] && _pct=0
+    [[ -z "$_7d" || "$_7d" == "null" ]] && _7d=0
 
     # 7d exhausted → fatal (per-tool for clear error message)
     if [[ "$_7d" -ge 100 ]]; then
