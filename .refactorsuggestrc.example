@@ -2,8 +2,10 @@
 # Copy this file to your project root as ".refactorsuggestrc" and customize.
 # CLI arguments always take precedence over these values.
 
-# Refactoring scope: micro | module | layer | full (default: micro)
-# SCOPE="micro"
+# Refactoring scope: auto | micro | module | layer | full (default: auto)
+# auto = pick largest feasible scope based on token budget at startup
+#   <75% used → module, 75-89% → micro, >=90% → error
+# SCOPE="auto"
 
 # Target branch to base the refactoring branch from (default: develop)
 # TARGET_BRANCH="develop"

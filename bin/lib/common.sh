@@ -171,6 +171,44 @@ _changed_files_since_snapshot() {
   printf '%s' "$_out"
 }
 
+# ── Budget-Aware Scope Resolution ────────────────────────────────────
+# Resolve "auto" scope to "micro" or "module" based on token budgets.
+# $1 = tool list (space-separated, e.g. "claude codex" or "claude")
+# stdout: "micro" | "module"
+# return 1 = budget insufficient for any scope
+_resolve_auto_scope() {
+  local _tools="${1:-claude codex}"
+  local _max_pct=0 _max_7d=0 _tool _json _pct _7d
+
+  for _tool in $_tools; do
+    _json=$(_wait_for_budget_fetch "$_tool")
+
+    _pct=$(printf '%s' "$_json" | jq -r '.five_hour_used_pct // 0')
+    _7d=$(printf '%s' "$_json" | jq -r '.seven_day_used_pct // 0')
+
+    [[ "$_pct" == "null" ]] && _pct=0
+    [[ "$_7d" == "null" ]] && _7d=0
+
+    # 7d exhausted → fatal
+    if [[ "$_7d" -ge 100 ]]; then
+      echo "Error: $_tool 7-day budget exhausted (${_7d}%)." >&2
+      return 1
+    fi
+
+    [[ "$_pct" -gt "$_max_pct" ]] && _max_pct="$_pct"
+    [[ "$_7d" -gt "$_max_7d" ]] && _max_7d="$_7d"
+  done
+
+  if [[ "$_max_pct" -ge 90 ]]; then
+    echo "Error: budget too low for any scope (${_max_pct}% used in 5h window)." >&2
+    return 1
+  elif [[ "$_max_pct" -ge 75 ]] || [[ "$_max_7d" -ge 90 ]]; then
+    printf 'micro'
+  else
+    printf 'module'
+  fi
+}
+
 # ── Claude Two-Step Execution ────────────────────────────────────────
 # Two-step Claude fix: opinion (read-only) → execute (edit tools).
 # $1 = review JSON, $2 = opinion output file, $3 = fix output file, $4 = label

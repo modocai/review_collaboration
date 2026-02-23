@@ -9,7 +9,7 @@ source "$SCRIPT_DIR/lib/common.sh"
 source "$SCRIPT_DIR/lib/self-review.sh"
 
 # ── Defaults ──────────────────────────────────────────────────────────
-SCOPE="micro"
+SCOPE="auto"
 TARGET_BRANCH="develop"
 MAX_LOOP="1"
 MAX_SUBLOOP=4
@@ -47,8 +47,8 @@ if [[ -n "$_GIT_ROOT" && -f "$_GIT_ROOT/$REFACTORSUGGESTRC" ]]; then
       fi
       if [[ "$_rc_key" == "SCOPE" ]]; then
         case "$_rc_val" in
-          micro|module|layer|full) ;;
-          *) echo "Error: SCOPE must be one of: micro, module, layer, full. Got '$_rc_val' (in .refactorsuggestrc)." >&2; exit 1 ;;
+          auto|micro|module|layer|full) ;;
+          *) echo "Error: SCOPE must be one of: auto, micro, module, layer, full. Got '$_rc_val' (in .refactorsuggestrc)." >&2; exit 1 ;;
         esac
       fi
       # Validate numeric retry values
@@ -92,7 +92,7 @@ usage() {
 Usage: refactor-suggest.sh [OPTIONS]
 
 Options:
-  --scope <scope>          Refactoring scope: micro|module|layer|full (default: micro)
+  --scope <scope>          Refactoring scope: auto|micro|module|layer|full (default: auto)
   -t, --target <branch>    Target branch to base from (default: develop)
   -n, --max-loop <N>       Maximum analysis-fix iterations (default: 1)
   --max-subloop <N>        Maximum self-review sub-iterations per fix (default: 4)
@@ -109,6 +109,7 @@ Options:
   -h, --help               Show this help message
 
 Scopes:
+  auto     Pick largest feasible scope based on token budget (default)
   micro    Function/file-level improvements (low blast radius)
   module   Duplication removal, module boundary cleanup (low-medium)
   layer    Cross-cutting concerns across modules (medium-high)
@@ -126,6 +127,7 @@ Flow:
   9. (--with-review) Run review-loop on the new PR
 
 Examples:
+  refactor-suggest.sh -n 3                          # auto scope
   refactor-suggest.sh --scope micro -n 3
   refactor-suggest.sh --scope module -n 2 --dry-run
   refactor-suggest.sh --scope layer -n 1 --auto-approve
@@ -185,8 +187,8 @@ if ! [[ "$REVIEW_LOOPS" =~ ^[1-9][0-9]*$ ]]; then
 fi
 
 case "$SCOPE" in
-  micro|module|layer|full) ;;
-  *) echo "Error: --scope must be one of: micro, module, layer, full. Got '$SCOPE'."; exit 1 ;;
+  auto|micro|module|layer|full) ;;
+  *) echo "Error: --scope must be one of: auto, micro, module, layer, full. Got '$SCOPE'."; exit 1 ;;
 esac
 
 if [[ "$WITH_REVIEW" == true ]]; then
@@ -302,13 +304,7 @@ fi
 
 CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 
-# ── Prompt validation ─────────────────────────────────────────────────
-CODEX_PROMPT_FILE="codex-refactor-${SCOPE}.prompt.md"
-if [[ ! -f "$PROMPTS_DIR/$CODEX_PROMPT_FILE" ]]; then
-  echo "Error: required prompt not found: $PROMPTS_DIR/$CODEX_PROMPT_FILE" >&2
-  exit 1
-fi
-
+# ── Prompt validation (scope-independent) ────────────────────────────
 if [[ "$DRY_RUN" == false ]]; then
   if [[ ! -f "$PROMPTS_DIR/claude-refactor-fix.prompt.md" ]]; then
     echo "Error: required prompt not found: $PROMPTS_DIR/claude-refactor-fix.prompt.md" >&2
@@ -323,6 +319,25 @@ fi
 if [[ "$MAX_SUBLOOP" -gt 0 ]] && [[ ! -f "$PROMPTS_DIR/claude-self-review.prompt.md" ]]; then
   echo "Warning: self-review prompt not found — disabling self-review."
   MAX_SUBLOOP=0
+fi
+
+# ── Auto scope resolution ─────────────────────────────────────────────
+if [[ "$SCOPE" == "auto" ]]; then
+  _auto_tools="codex"
+  [[ "$DRY_RUN" == false ]] && _auto_tools="claude codex"
+  if ! SCOPE=$(_resolve_auto_scope "$_auto_tools"); then
+    echo "Error: auto scope resolution failed — budget insufficient." >&2
+    exit 1
+  fi
+  echo "Auto scope resolved to: $SCOPE"
+  unset _auto_tools
+fi
+
+# ── Prompt validation (scope-dependent) ──────────────────────────────
+CODEX_PROMPT_FILE="codex-refactor-${SCOPE}.prompt.md"
+if [[ ! -f "$PROMPTS_DIR/$CODEX_PROMPT_FILE" ]]; then
+  echo "Error: required prompt not found: $PROMPTS_DIR/$CODEX_PROMPT_FILE" >&2
+  exit 1
 fi
 
 # ── Branch creation ───────────────────────────────────────────────────
