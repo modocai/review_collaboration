@@ -63,6 +63,7 @@ _self_review_subloop() {
   local _summary="" _j _fix_files_tmp _self_review_file _self_review_prompt
   local _rc _self_review_json _sr_findings _sr_overall
   local _refix_file _refix_opinion_file _refix_input_json
+  local _prev_sr_fingerprint=""
 
   export ITERATION="$_iteration"
 
@@ -125,6 +126,7 @@ _self_review_subloop() {
    - Potential edge cases or error handling gaps
    - Minor improvements that are low-risk and localized to the changed files
    - Do NOT flag issues in unchanged code — only in files touched by the diff
+7. **Strict correctness in fix-nits mode**: When any finding remains (including nits and style issues), you MUST set `overall_correctness` to `"patch is incorrect"`. Only return `"patch is correct"` when there are truly zero findings.
 GUIDELINES
 )"
     else
@@ -169,6 +171,16 @@ GUIDELINES
       _summary="${_summary}Sub-iteration $_j: 0 findings — passed\n"
       break
     fi
+
+    # Convergence check: same findings after re-fix means we're not making progress
+    local _sr_fingerprint
+    _sr_fingerprint=$(printf '%s' "$_self_review_json" | jq -r '[(.findings // [])[] | "\(.title)@\(.code_location.file_path // ""):\(.code_location.line_range.start // 0)"] | sort | join("|")')
+    if [[ $_j -gt 1 ]] && [[ "$_sr_fingerprint" == "$_prev_sr_fingerprint" ]]; then
+      echo "  Findings unchanged ($_sr_findings) after re-fix — stopping (not converging)." >&2
+      _summary="${_summary}Sub-iteration $_j: $_sr_findings findings — not converging\n"
+      break
+    fi
+    _prev_sr_fingerprint="$_sr_fingerprint"
 
     # Dry-run: report findings but skip re-fix
     if [[ "$_dry_run" == true ]]; then
