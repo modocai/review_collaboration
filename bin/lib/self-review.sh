@@ -63,7 +63,7 @@ _self_review_subloop() {
   local _summary="" _j _fix_files_tmp _self_review_file _self_review_prompt
   local _rc _self_review_json _sr_findings _sr_overall
   local _refix_file _refix_opinion_file _refix_input_json
-  local _prev_sr_findings=-1
+  local _prev_sr_fingerprint=""
 
   export ITERATION="$_iteration"
 
@@ -172,13 +172,15 @@ GUIDELINES
       break
     fi
 
-    # Convergence check: same finding count after re-fix means we're not making progress
-    if [[ $_j -gt 1 ]] && [[ "$_sr_findings" -eq "$_prev_sr_findings" ]]; then
+    # Convergence check: same findings after re-fix means we're not making progress
+    local _sr_fingerprint
+    _sr_fingerprint=$(printf '%s' "$_self_review_json" | jq -r '[.findings[].title] | sort | join("|")')
+    if [[ $_j -gt 1 ]] && [[ "$_sr_fingerprint" == "$_prev_sr_fingerprint" ]]; then
       echo "  Findings unchanged ($_sr_findings) after re-fix — stopping (not converging)." >&2
       _summary="${_summary}Sub-iteration $_j: $_sr_findings findings — not converging\n"
       break
     fi
-    _prev_sr_findings="$_sr_findings"
+    _prev_sr_fingerprint="$_sr_fingerprint"
 
     # Dry-run: report findings but skip re-fix
     if [[ "$_dry_run" == true ]]; then
