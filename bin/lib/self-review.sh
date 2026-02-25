@@ -64,6 +64,7 @@ _self_review_subloop() {
   local _rc _self_review_json _sr_findings _sr_overall
   local _refix_file _refix_opinion_file _refix_input_json
   local _prev_sr_fingerprint=""
+  local _sr_history=""
 
   export ITERATION="$_iteration"
 
@@ -133,7 +134,24 @@ GUIDELINES
       export EXTRA_REVIEW_GUIDELINES=""
     fi
 
-    _self_review_prompt=$(envsubst '$CURRENT_BRANCH $TARGET_BRANCH $ITERATION $REVIEW_JSON $DIFF_FILE $EXTRA_REVIEW_GUIDELINES' < "$PROMPTS_DIR/claude-self-review.prompt.md")
+    # Inject sub-iteration history so the reviewer knows what was already flagged
+    if [[ -n "$_sr_history" ]]; then
+      export SELF_REVIEW_HISTORY="$(cat <<HISTORY_EOF
+
+## Previous Sub-Iteration Findings
+
+The following findings were flagged in previous sub-iterations and re-fix was already attempted.
+Do NOT repeat these same findings. Only flag NEW issues or issues that the re-fix introduced.
+If a previous finding persists after re-fix, you may re-flag it but explicitly note that the previous fix attempt failed and suggest a different approach.
+
+${_sr_history}
+HISTORY_EOF
+)"
+    else
+      export SELF_REVIEW_HISTORY=""
+    fi
+
+    _self_review_prompt=$(envsubst '$CURRENT_BRANCH $TARGET_BRANCH $ITERATION $REVIEW_JSON $DIFF_FILE $EXTRA_REVIEW_GUIDELINES $SELF_REVIEW_HISTORY' < "$PROMPTS_DIR/claude-self-review.prompt.md")
 
     # Pre-flight budget check
     if ! _wait_for_budget "claude" "${BUDGET_SCOPE:-micro}"; then
@@ -203,6 +221,23 @@ GUIDELINES
       fi
     fi
 
+    # Inject sub-iteration history so the fixer knows what was already tried
+    if [[ -n "$_sr_history" ]]; then
+      export FIX_HISTORY="$(cat <<FIX_HISTORY_EOF
+
+## Previous Fix Attempts
+
+Previous sub-iterations already attempted fixes for the findings below.
+If the same or similar findings appear again, try a DIFFERENT approach from what was done before.
+Do not revert previous fixes unless they introduced new bugs.
+
+${_sr_history}
+FIX_HISTORY_EOF
+)"
+    else
+      export FIX_HISTORY=""
+    fi
+
     if ! _claude_two_step_fix "$_refix_input_json" "$_refix_opinion_file" "$_refix_file" "re-fix" \
       "$_opinion_prompt" "$_execute_prompt" >&2; then
       _summary="${_summary}Sub-iteration $_j: $_sr_findings findings — re-fix failed\n"
@@ -225,6 +260,14 @@ GUIDELINES
         fi
       fi
     fi
+    # Accumulate findings for next sub-iteration's history context
+    local _fence='```'
+    _sr_history="${_sr_history}### Sub-iteration ${_j} (${_sr_findings} findings)
+${_fence}json
+${_self_review_json}
+${_fence}
+
+"
     _summary="${_summary}Sub-iteration $_j: $_sr_findings findings — re-fixed\n"
   done
 

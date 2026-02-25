@@ -314,7 +314,7 @@ _claude_two_step_fix() {
 
   _session_id=$(_gen_uuid)
 
-  _prompt=$(REVIEW_JSON="$_rjson" envsubst '$CURRENT_BRANCH $TARGET_BRANCH $REVIEW_JSON' < "$PROMPTS_DIR/$_opinion_prompt")
+  _prompt=$(REVIEW_JSON="$_rjson" envsubst '$CURRENT_BRANCH $TARGET_BRANCH $REVIEW_JSON $FIX_HISTORY' < "$PROMPTS_DIR/$_opinion_prompt")
 
   # Pre-flight budget check (step 1)
   if ! _wait_for_budget "claude" "${BUDGET_SCOPE:-module}"; then
