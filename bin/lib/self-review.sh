@@ -180,6 +180,13 @@ HISTORY_EOF
       break
     fi
 
+    # Guard against schema-invalid JSON (e.g. "findings": "oops" instead of array)
+    if ! printf '%s' "$_self_review_json" | jq -e '.findings | type == "array"' >/dev/null 2>&1; then
+      echo "  Warning: self-review output has invalid findings shape (sub-iteration $_j). Continuing with current fixes." >&2
+      _summary="${_summary}Sub-iteration $_j: invalid findings schema\n"
+      break
+    fi
+
     _sr_findings=$(printf '%s' "$_self_review_json" | jq '.findings | length')
     _sr_overall=$(printf '%s' "$_self_review_json" | jq -r '.overall_correctness')
     echo "  Self-review: $_sr_findings findings | $_sr_overall" >&2
