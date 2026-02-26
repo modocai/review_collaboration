@@ -135,18 +135,10 @@ GUIDELINES
     fi
 
     # Inject sub-iteration history so the reviewer knows what was already flagged
+    # printf -v prevents shell re-expansion of $ characters inside _sr_history
     if [[ -n "$_sr_history" ]]; then
-      export SELF_REVIEW_HISTORY="$(cat <<HISTORY_EOF
-
-## Previous Sub-Iteration Findings
-
-The following findings were flagged in previous sub-iterations and re-fix was already attempted.
-Do NOT repeat these same findings. Only flag NEW issues or issues that the re-fix introduced.
-If a previous finding persists after re-fix, you may re-flag it but explicitly note that the previous fix attempt failed and suggest a different approach.
-
-${_sr_history}
-HISTORY_EOF
-)"
+      printf -v SELF_REVIEW_HISTORY '\n## Previous Sub-Iteration Findings\n\nThe following findings were flagged in previous sub-iterations and re-fix was already attempted.\nDo NOT repeat these same findings. Only flag NEW issues or issues that the re-fix introduced.\nIf a previous finding persists after re-fix, you may re-flag it but explicitly note that the previous fix attempt failed and suggest a different approach.\n\n%s' "$_sr_history"
+      export SELF_REVIEW_HISTORY
     else
       export SELF_REVIEW_HISTORY=""
     fi
@@ -222,18 +214,10 @@ HISTORY_EOF
     fi
 
     # Inject sub-iteration history so the fixer knows what was already tried
+    # printf -v prevents shell re-expansion of $ characters inside _sr_history
     if [[ -n "$_sr_history" ]]; then
-      export FIX_HISTORY="$(cat <<FIX_HISTORY_EOF
-
-## Previous Fix Attempts
-
-Previous sub-iterations already attempted fixes for the findings below.
-If the same or similar findings appear again, try a DIFFERENT approach from what was done before.
-Do not revert previous fixes unless they introduced new bugs.
-
-${_sr_history}
-FIX_HISTORY_EOF
-)"
+      printf -v FIX_HISTORY '\n## Previous Fix Attempts\n\nPrevious sub-iterations already attempted fixes for the findings below.\nIf the same or similar findings appear again, try a DIFFERENT approach from what was done before.\nDo not revert previous fixes unless they introduced new bugs.\n\n%s' "$_sr_history"
+      export FIX_HISTORY
     else
       export FIX_HISTORY=""
     fi
