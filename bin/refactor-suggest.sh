@@ -631,6 +631,7 @@ for (( i=1; i<=MAX_LOOP; i++ )); do
   # ── f. Claude fix (two-step: opinion → execute) ─────────────────
   FIX_FILE="$LOG_DIR/fix-${i}.md"
   OPINION_FILE="$LOG_DIR/opinion-${i}.md"
+  FIX_HISTORY=""  # Clear stale sub-iteration history from previous iteration
 
   if ! _claude_two_step_fix "$REVIEW_JSON" "$OPINION_FILE" "$FIX_FILE" "refactor-fix" \
     "claude-refactor-fix.prompt.md" "claude-refactor-fix-execute.prompt.md"; then

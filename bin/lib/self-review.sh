@@ -172,6 +172,13 @@ GUIDELINES
       break
     fi
 
+    # Guard against schema-invalid JSON (e.g. "findings": "oops" instead of array)
+    if ! printf '%s' "$_self_review_json" | jq -e '.findings | type == "array"' >/dev/null 2>&1; then
+      echo "  Warning: self-review output has invalid findings shape (sub-iteration $_j). Continuing with current fixes." >&2
+      _summary="${_summary}Sub-iteration $_j: invalid findings schema\n"
+      break
+    fi
+
     _sr_findings=$(printf '%s' "$_self_review_json" | jq '.findings | length')
     _sr_overall=$(printf '%s' "$_self_review_json" | jq -r '.overall_correctness')
     echo "  Self-review: $_sr_findings findings | $_sr_overall" >&2
@@ -184,7 +191,7 @@ GUIDELINES
 
     # Convergence check: same findings after re-fix means we're not making progress
     local _sr_fingerprint
-    _sr_fingerprint=$(printf '%s' "$_self_review_json" | jq -r '[(.findings // [])[] | select(type == "object") | "\(.title // "")@\(.code_location?.file_path // ""):\(.code_location?.line_range?.start // 0)"] | sort | join("|")')
+    _sr_fingerprint=$(printf '%s' "$_self_review_json" | jq -r '[(.findings // [])[] | select(type == "object") | "\(.title // "")@\(.code_location?.file_path // "")@\(.body // "" | tostring | .[0:60])"] | sort | join("|")')
     if [[ $_j -gt 1 ]] && [[ "$_sr_fingerprint" == "$_prev_sr_fingerprint" ]]; then
       echo "  Findings unchanged ($_sr_findings) after re-fix — stopping (not converging)." >&2
       _summary="${_summary}Sub-iteration $_j: $_sr_findings findings — not converging\n"
