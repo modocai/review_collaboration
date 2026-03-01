@@ -184,7 +184,7 @@ GUIDELINES
 
     # Convergence check: same findings after re-fix means we're not making progress
     local _sr_fingerprint
-    _sr_fingerprint=$(printf '%s' "$_self_review_json" | jq -r '[(.findings // [])[] | "\(.title)@\(.code_location.file_path // ""):\(.code_location.line_range.start // 0)"] | sort | join("|")')
+    _sr_fingerprint=$(printf '%s' "$_self_review_json" | jq -r '[(.findings // [])[] | "\(.title // "")@\(.code_location?.file_path // ""):\(.code_location?.line_range?.start // 0)"] | sort | join("|")')
     if [[ $_j -gt 1 ]] && [[ "$_sr_fingerprint" == "$_prev_sr_fingerprint" ]]; then
       echo "  Findings unchanged ($_sr_findings) after re-fix — stopping (not converging)." >&2
       _summary="${_summary}Sub-iteration $_j: $_sr_findings findings — not converging\n"
