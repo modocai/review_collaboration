@@ -63,6 +63,8 @@ _self_review_subloop() {
   local _summary="" _j _fix_files_tmp _self_review_file _self_review_prompt
   local _rc _self_review_json _sr_findings _sr_overall
   local _refix_file _refix_opinion_file _refix_input_json
+  local _prev_sr_fingerprint=""
+  local _sr_history=""
 
   export ITERATION="$_iteration"
 
@@ -125,13 +127,23 @@ _self_review_subloop() {
    - Potential edge cases or error handling gaps
    - Minor improvements that are low-risk and localized to the changed files
    - Do NOT flag issues in unchanged code — only in files touched by the diff
+7. **Strict correctness in fix-nits mode**: When any finding remains (including nits and style issues), you MUST set `overall_correctness` to `"patch is incorrect"`. Only return `"patch is correct"` when there are truly zero findings.
 GUIDELINES
 )"
     else
       export EXTRA_REVIEW_GUIDELINES=""
     fi
 
-    _self_review_prompt=$(envsubst '$CURRENT_BRANCH $TARGET_BRANCH $ITERATION $REVIEW_JSON $DIFF_FILE $EXTRA_REVIEW_GUIDELINES' < "$PROMPTS_DIR/claude-self-review.prompt.md")
+    # Inject sub-iteration history so the reviewer knows what was already flagged
+    # printf -v prevents shell re-expansion of $ characters inside _sr_history
+    if [[ -n "$_sr_history" ]]; then
+      printf -v SELF_REVIEW_HISTORY '\n## Previous Sub-Iteration Findings\n\nThe following findings were flagged in previous sub-iterations and re-fix was already attempted.\nDo NOT repeat these same findings. Only flag NEW issues or issues that the re-fix introduced.\nIf a previous finding persists after re-fix, you may re-flag it but explicitly note that the previous fix attempt failed and suggest a different approach.\n\n%s' "$_sr_history"
+      export SELF_REVIEW_HISTORY
+    else
+      export SELF_REVIEW_HISTORY=""
+    fi
+
+    _self_review_prompt=$(envsubst '$CURRENT_BRANCH $TARGET_BRANCH $ITERATION $REVIEW_JSON $DIFF_FILE $EXTRA_REVIEW_GUIDELINES $SELF_REVIEW_HISTORY' < "$PROMPTS_DIR/claude-self-review.prompt.md")
 
     # Pre-flight budget check
     if ! _wait_for_budget "claude" "${BUDGET_SCOPE:-micro}"; then
@@ -160,6 +172,13 @@ GUIDELINES
       break
     fi
 
+    # Guard against schema-invalid JSON (e.g. "findings": "oops" instead of array)
+    if ! printf '%s' "$_self_review_json" | jq -e '.findings | type == "array"' >/dev/null 2>&1; then
+      echo "  Warning: self-review output has invalid findings shape (sub-iteration $_j). Continuing with current fixes." >&2
+      _summary="${_summary}Sub-iteration $_j: invalid findings schema\n"
+      break
+    fi
+
     _sr_findings=$(printf '%s' "$_self_review_json" | jq '.findings | length')
     _sr_overall=$(printf '%s' "$_self_review_json" | jq -r '.overall_correctness')
     echo "  Self-review: $_sr_findings findings | $_sr_overall" >&2
@@ -169,6 +188,16 @@ GUIDELINES
       _summary="${_summary}Sub-iteration $_j: 0 findings — passed\n"
       break
     fi
+
+    # Convergence check: same findings after re-fix means we're not making progress
+    local _sr_fingerprint
+    _sr_fingerprint=$(printf '%s' "$_self_review_json" | jq -r '[(.findings // [])[] | select(type == "object") | "\(.title // "")@\(.code_location?.file_path // "")@\(.body // "" | tostring | .[0:60])"] | sort | join("|")')
+    if [[ $_j -gt 1 ]] && [[ "$_sr_fingerprint" == "$_prev_sr_fingerprint" ]]; then
+      echo "  Findings unchanged ($_sr_findings) after re-fix — stopping (not converging)." >&2
+      _summary="${_summary}Sub-iteration $_j: $_sr_findings findings — not converging\n"
+      break
+    fi
+    _prev_sr_fingerprint="$_sr_fingerprint"
 
     # Dry-run: report findings but skip re-fix
     if [[ "$_dry_run" == true ]]; then
@@ -189,6 +218,15 @@ GUIDELINES
       else
         _refix_input_json=$(printf '%s' "$_self_review_json" | "$_refix_json_hook" "$_original_review_json")
       fi
+    fi
+
+    # Inject sub-iteration history so the fixer knows what was already tried
+    # printf -v prevents shell re-expansion of $ characters inside _sr_history
+    if [[ -n "$_sr_history" ]]; then
+      printf -v FIX_HISTORY '\n## Previous Fix Attempts\n\nPrevious sub-iterations already attempted fixes for the findings below.\nIf the same or similar findings appear again, try a DIFFERENT approach from what was done before.\nDo not revert previous fixes unless they introduced new bugs.\n\n%s' "$_sr_history"
+      export FIX_HISTORY
+    else
+      export FIX_HISTORY=""
     fi
 
     if ! _claude_two_step_fix "$_refix_input_json" "$_refix_opinion_file" "$_refix_file" "re-fix" \
@@ -213,6 +251,14 @@ GUIDELINES
         fi
       fi
     fi
+    # Accumulate findings for next sub-iteration's history context
+    local _fence='```'
+    _sr_history="${_sr_history}### Sub-iteration ${_j} (${_sr_findings} findings)
+${_fence}json
+${_self_review_json}
+${_fence}
+
+"
     _summary="${_summary}Sub-iteration $_j: $_sr_findings findings — re-fixed\n"
   done
 

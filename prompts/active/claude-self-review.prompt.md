@@ -32,6 +32,7 @@ ${REVIEW_JSON}
 4. **Reject reviewer hallucinations**: If the original reviewer flagged a non-issue and the developer "fixed" working code, flag that as a problem.
 5. Only flag issues with **confidence >= 0.85**.
 ${EXTRA_REVIEW_GUIDELINES}
+${SELF_REVIEW_HISTORY}
 
 ## Output Format
 
